@@ -3,3 +3,10 @@ flask-cors==4.0.0
 numpy==1.24.3
 librosa==0.10.0
 soundfile==0.12.1
+openai-whisper
+torch
+torchvision
+torchaudio
+gTTS==2.3.2
+transformers==4.33.0
+accelerate==0.23.0

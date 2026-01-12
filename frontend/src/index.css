@@ -66,3 +66,18 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Ensure form inputs and editable areas use a readable (dark) text color
+   even when the app-wide color is light-on-dark. Keeps placeholder visible. */
+input,
+textarea,
+select,
+[contenteditable] {
+  color: #0f172a;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8;
+  opacity: 1;
+}

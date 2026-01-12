@@ -6,20 +6,54 @@ const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
 
-redisClient.connect().catch(console.error);
+let isRedisConnected = false;
+
+redisClient.on('error', (err) => {
+  if (isRedisConnected) {
+    console.error('❌ Redis Client Error:', err);
+    isRedisConnected = false;
+  }
+});
+
+redisClient.on('connect', () => {
+  console.log('✅ Connected to Redis');
+  isRedisConnected = true;
+});
+
+redisClient.connect().catch(err => {
+  console.log('⚠️ Failed to connect to Redis. Falling back to in-memory storage.');
+  isRedisConnected = false;
+});
 
 class InterviewService {
   constructor() {
     this.interviews = new Map();
   }
-  
+
   async createInterview({ candidateName, position, experienceLevel, userId }) {
     const interviewId = uuidv4();
     const timestamp = Date.now();
-    
+
     // Generate questions for this interview
     const questions = await aiService.generateQuestions(position, experienceLevel);
-    
+
+    const formattedQuestions = questions.map((q, i) => ({
+      id: i,
+      text: q.question,
+      type: q.type,
+      expectedTime: q.expectedTime || 120, // seconds
+      answer: null,
+      transcription: null,
+      voiceAnalysis: null,
+      videoMetrics: null,
+      aiEvaluation: null
+    }));
+
+    // Attach audio to the first question
+    if (formattedQuestions.length > 0) {
+      formattedQuestions[0].audio = await aiService.getAudioForText(formattedQuestions[0].text);
+    }
+
     const interview = {
       id: interviewId,
       candidateName,
@@ -29,17 +63,7 @@ class InterviewService {
       status: 'active',
       startTime: timestamp,
       currentQuestion: 0,
-      questions: questions.map((q, i) => ({
-        id: i,
-        text: q.question,
-        type: q.type,
-        expectedTime: q.expectedTime || 120, // seconds
-        answer: null,
-        transcription: null,
-        voiceAnalysis: null,
-        videoMetrics: null,
-        aiEvaluation: null
-      })),
+      questions: formattedQuestions,
       metrics: {
         totalQuestions: questions.length,
         completedQuestions: 0,
@@ -49,92 +73,136 @@ class InterviewService {
       },
       finalEvaluation: null
     };
-    
-    // Store in Redis with 24h expiry
-    await redisClient.setEx(
-      `interview:${interviewId}`,
-      24 * 60 * 60, // 24 hours
-      JSON.stringify(interview)
-    );
-    
+
+    // Store in Redis with 24h expiry if connected, otherwise in memory
+    if (isRedisConnected) {
+      try {
+        await redisClient.setEx(
+          `interview:${interviewId}`,
+          24 * 60 * 60, // 24 hours
+          JSON.stringify(interview)
+        );
+      } catch (err) {
+        console.error('Redis set error, falling back to memory:', err);
+        this.interviews.set(interviewId, interview);
+      }
+    } else {
+      this.interviews.set(interviewId, interview);
+    }
+
     return interview;
   }
-  
+
   async getInterview(interviewId) {
-    const interview = await redisClient.get(`interview:${interviewId}`);
-    return interview ? JSON.parse(interview) : null;
+    if (isRedisConnected) {
+      try {
+        const interview = await redisClient.get(`interview:${interviewId}`);
+        return interview ? JSON.parse(interview) : this.interviews.get(interviewId);
+      } catch (err) {
+        return this.interviews.get(interviewId);
+      }
+    }
+    return this.interviews.get(interviewId);
   }
-  
+
+  async saveInterview(interview) {
+    if (isRedisConnected) {
+      try {
+        await redisClient.setEx(
+          `interview:${interview.id}`,
+          24 * 60 * 60,
+          JSON.stringify(interview)
+        );
+      } catch (err) {
+        this.interviews.set(interview.id, interview);
+      }
+    } else {
+      this.interviews.set(interview.id, interview);
+    }
+  }
+
   async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics }) {
-    let interview = await this.getInterview(interviewId);
-    
+    const interview = await this.getInterview(interviewId);
+
     if (!interview) {
       throw new Error('Interview not found');
     }
-    
+
     if (questionIndex >= interview.questions.length) {
       throw new Error('Invalid question index');
     }
-    
+
     const question = interview.questions[questionIndex];
-    
-    // Process in parallel
-    const [transcription, voiceAnalysis] = await Promise.all([
-      aiService.transcribeAudio(audioBuffer, audioMimeType, { interviewId, questionId: question.id }),
-      aiService.analyzeVoice(audioBuffer)
-    ]);
-    
-    // Evaluate answer using AI
-    const aiEvaluation = await aiService.evaluateAnswer({
-      question: question.text,
-      answer: transcription.text,
-      voiceMetrics: voiceAnalysis,
-      videoMetrics
-    });
-    
-    // Update question data
-    question.answer = audioBuffer;
-    question.transcription = transcription;
-    question.voiceAnalysis = voiceAnalysis;
-    question.videoMetrics = videoMetrics;
-    question.aiEvaluation = aiEvaluation;
-    question.answeredAt = Date.now();
-    
-    // Update interview metrics
-    interview.metrics.completedQuestions++;
+
+    // 1. Save audio to temporary file for background processing
+    const fs = require('fs').promises;
+    const path = require('path');
+    const tempFileName = `audio_${interviewId}_${questionIndex}_${Date.now()}.webm`;
+    const tempPath = path.join(__dirname, '../uploads', tempFileName);
+
+    await fs.writeFile(tempPath, audioBuffer);
+
+    // 2. Enqueue analysis job
+    // 2. Enqueue analysis job
+    const { analysisQueue, processJob } = require('../queues/analysisQueue');
+
+    if (isRedisConnected) {
+      await analysisQueue.add({
+        interviewId,
+        questionIndex,
+        audioPath: tempPath,
+        audioMimeType,
+        videoMetrics
+      }, {
+        attempts: 3,
+        backoff: 5000
+      });
+      console.log(`[Queue] Added analysis job for ${interviewId} Q${questionIndex}`);
+    } else {
+      // Fallback: Process immediately (background async)
+      console.log(`[Queue] Redis not connected. Processing ${interviewId} Q${questionIndex} directly.`);
+      // Don't await this, let it run in background like a job
+      processJob({
+        interviewId,
+        questionIndex,
+        audioPath: tempPath,
+        audioMimeType,
+        videoMetrics
+      }).catch(err => console.error('Direct processing error:', err));
+    }
+
+    // 3. Mark as answering (placeholder until worker updates)
+    question.answer = 'processing'; // We don't store the full buffer in interview object anymore to save space
+
+    // Update interview progress
     interview.currentQuestion = questionIndex + 1;
-    
+    interview.metrics.completedQuestions++;
+
     // Check if interview is complete
     let isComplete = false;
     let nextQuestion = null;
-    
+
     if (interview.currentQuestion >= interview.questions.length) {
       interview.status = 'completed';
       interview.endTime = Date.now();
-      
-      // Generate final evaluation
-      interview.finalEvaluation = await this.generateFinalEvaluation(interview);
       isComplete = true;
+      // Final evaluation will be generated by the worker
     } else {
-      // Get next question
       nextQuestion = interview.questions[interview.currentQuestion];
+      // Attach audio for the next question
+      nextQuestion.audio = await aiService.getAudioForText(nextQuestion.text);
     }
-    
-    // Save updated interview
-    await redisClient.setEx(
-      `interview:${interviewId}`,
-      24 * 60 * 60,
-      JSON.stringify(interview)
-    );
-    
+
+    // Save updated interview status
+    await this.saveInterview(interview);
+
     return {
       nextQuestion,
-      evaluation: aiEvaluation,
       isComplete,
-      finalEvaluation: interview.finalEvaluation
+      message: 'Answer submitted and processing in background'
     };
   }
-  
+
   async generateFinalEvaluation(interview) {
     const answersSummary = interview.questions.map(q => ({
       question: q.text,
@@ -143,7 +211,7 @@ class InterviewService {
       clarity: q.voiceAnalysis?.clarity || 0,
       evaluation: q.aiEvaluation
     }));
-    
+
     return await aiService.generateFinalReport({
       candidateName: interview.candidateName,
       position: interview.position,
@@ -151,30 +219,27 @@ class InterviewService {
       metrics: interview.metrics
     });
   }
-  
+
   async endInterview(interviewId) {
     let interview = await this.getInterview(interviewId);
-    
+
     if (!interview) {
       throw new Error('Interview not found');
     }
-    
+
     if (interview.status !== 'completed') {
       interview.status = 'completed';
       interview.endTime = Date.now();
-      
-      // Generate final evaluation if not already done
-      if (!interview.finalEvaluation) {
+
+      // Only generate if all questions are answered (background worker might be doing this too)
+      const allAnswered = interview.questions.every(q => q.transcription);
+      if (allAnswered && !interview.finalEvaluation) {
         interview.finalEvaluation = await this.generateFinalEvaluation(interview);
       }
-      
-      await redisClient.setEx(
-        `interview:${interviewId}`,
-        24 * 60 * 60,
-        JSON.stringify(interview)
-      );
+
+      await this.saveInterview(interview);
     }
-    
+
     return interview.finalEvaluation;
   }
 }

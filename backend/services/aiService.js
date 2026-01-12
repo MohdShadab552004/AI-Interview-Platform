@@ -1,16 +1,78 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-// Initialize Gemini AI client
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// OpenRouter SDK caused installation issues on Windows, switching to direct Axios
+// const { OpenRouter } = require("@openrouter/sdk");
+const { default: axios } = require("axios");
+const FormData = require('form-data');
+const env = require('../config/env');
 
 class AIService {
   constructor() {
-    // Use the correct model name
-    this.geminiModel = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash" // Updated from "gemini-pro"
-    });
+    this.apiKey = process.env.OPENROUTER_API_KEY;
+    this.siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    this.siteTitle = 'Interview Platform';
+
+    // Default models
+    this.defaultModel = 'google/gemini-2.0-flash-001'; // Fast and capable
+    this.complexModel = 'google/gemini-2.0-flash-001';
   }
-  
+
+  async callOpenRouter(prompt, model = this.defaultModel) {
+    try {
+      if (!this.apiKey) {
+        throw new Error('OPENROUTER_API_KEY is not defined in environment variables');
+      }
+
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          model: model,
+          messages: [
+            {
+              role: 'user',
+              content: prompt,
+            },
+          ],
+          stream: false,
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'HTTP-Referer': this.siteUrl,
+            'X-Title': this.siteTitle,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      if (response.data && response.data.choices && response.data.choices.length > 0) {
+        return response.data.choices[0].message.content;
+      }
+      throw new Error('No valid response from OpenRouter API');
+    } catch (error) {
+      console.error('OpenRouter API Error:', error.response ? error.response.data : error.message);
+      throw error;
+    }
+  }
+
+  async parseJSONResponse(text) {
+    if (!text) return null;
+    try {
+      // Try parsing directly
+      return JSON.parse(text);
+    } catch (e) {
+      // Try to extract JSON from markdown code blocks or raw text
+      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+      if (jsonMatch) {
+        try {
+          return JSON.parse(jsonMatch[0]);
+        } catch (e2) {
+          console.error('JSON parse error from extracted text:', e2);
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
   // Generate interview questions
   async generateQuestions(position, experienceLevel, count = 5) {
     const prompt = `
@@ -25,143 +87,153 @@ class AIService {
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
     `;
-    
+
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      console.log('Gemini raw response:', text);
-      
-      // Extract JSON from response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+      const text = await this.callOpenRouter(prompt);
+      console.log('OpenRouter raw response (Questions):', text);
+
+      const parsed = await this.parseJSONResponse(text);
+      if (parsed) {
         console.log('Successfully parsed questions:', parsed);
         return parsed;
       }
-      
+
       console.log('No JSON found in response, using fallback');
       return this.getFallbackQuestions(position, count);
     } catch (error) {
-      console.error('Error generating questions with Gemini:', error);
-      console.error('Error details:', error.message);
+      console.error('Error generating questions with OpenRouter:', error);
       return this.getFallbackQuestions(position, count);
     }
   }
-  
-  // Transcribe audio using Gemini (text-based analysis)
+
+  // Transcribe audio using Python Whisper service (with OpenRouter fallback)
   async transcribeAudio(audioBuffer, mimeType, metadata = {}) {
-    const prompt = `
-      Analyze this audio transcription and provide insights. 
-      Return JSON with: transcription text, confidence score (0-1), 
-      speaking pace (slow/normal/fast), filler word count estimate,
-      and emotional tone (confident/neutral/nervous).
-      
-      Audio Context: Interview response
-      Audio Metadata: ${JSON.stringify(metadata)}
-      
-      IMPORTANT: Return ONLY valid JSON. Do not include any additional text.
-    `;
-    
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      console.log('Transcription raw response:', text);
-      
-      // Extract JSON from response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const analysis = JSON.parse(jsonMatch[0]);
-        
-        return {
-          text: analysis.transcription || "Audio processed successfully",
-          language: "en",
-          duration: metadata.duration || 0,
-          confidence: analysis.confidence || 0.8,
-          pace: analysis.pace || "normal",
-          fillerWords: analysis.fillerWordCount || 0,
-          tone: analysis.emotionalTone || "neutral",
-          metadata,
-          rawAnalysis: analysis
-        };
+      console.log('Sending audio to Whisper service for transcription...');
+
+      const formData = new FormData();
+      formData.append('audio', audioBuffer, {
+        filename: 'audio.webm',
+        contentType: mimeType
+      });
+
+      const whisperResponse = await axios.post(`${env.PYTHON_SERVICE_URL}/transcribe`, formData, {
+        headers: {
+          ...formData.getHeaders()
+        }
+      });
+
+      if (whisperResponse.data && whisperResponse.data.success) {
+        console.log('Whisper transcription successful');
+        const text = whisperResponse.data.text;
+
+        // Use OpenRouter for additional insights based on the text
+        const analysisPrompt = `
+          Analyze this interview response text: "${text}"
+          Return JSON with: confidence score (0-1), 
+          speaking pace (slow/normal/fast), filler word count estimate,
+          and emotional tone (confident/neutral/nervous).
+          
+          IMPORTANT: Return ONLY valid JSON.
+        `;
+
+        try {
+          const analysisText = await this.callOpenRouter(analysisPrompt);
+          const analysis = (await this.parseJSONResponse(analysisText)) || {};
+
+          return {
+            text: text,
+            language: whisperResponse.data.language || "en",
+            duration: metadata.duration || 0,
+            confidence: analysis.confidence || 0.9,
+            pace: analysis.pace || "normal",
+            fillerWords: analysis.fillerWordCount || 0,
+            tone: analysis.emotionalTone || "neutral",
+            metadata,
+            provider: 'whisper'
+          };
+        } catch (aiError) {
+          console.warn('AI analysis failed, returning raw Whisper transcription:', aiError.message);
+          return {
+            text: text,
+            language: whisperResponse.data.language || "en",
+            duration: metadata.duration || 0,
+            confidence: 0.8,
+            pace: "normal",
+            fillerWords: 0,
+            tone: "neutral",
+            metadata,
+            provider: 'whisper'
+          };
+        }
       }
-      
-      return {
-        text: "Audio transcription completed",
-        language: "en",
-        duration: metadata.duration || 0,
-        confidence: 0.7,
-        pace: "normal",
-        fillerWords: 0,
-        tone: "neutral",
-        metadata
-      };
-    } catch (error) {
-      console.error('Error processing audio with Gemini:', error);
-      throw new Error('Audio processing failed');
+    } catch (whisperError) {
+      console.error('Whisper transcription failed, falling back to OpenRouter:', whisperError.message);
     }
+
+    // Fallback to OpenRouter transcription (text-based analysis is impossible without audio file upload support in text chat, 
+    // unless OpenRouter model supports multimodal. 'google/gemini-flash-1.5' does, but sending buffer via SDK might be tricky. 
+    // For now we will return a mock or error if Whisper fails, as text-only LLMs can't transcribe audio directly from buffer without specific support)
+    // IMPORTANT: OpenRouter SDK standard chat usually expects text. 
+    // We will assume for now that if Whisper fails, we can't easily transcribe without a proper audio-capable model endpoint setup.
+
+    console.log('Whisper failed and fallback to LLM for audio bytes is not fully supported in this configuration. Returning fallback.');
+
+    return {
+      text: "Audio transcription unavailable (Service Error)",
+      language: "en",
+      duration: metadata.duration || 0,
+      confidence: 0.0,
+      pace: "unknown",
+      fillerWords: 0,
+      tone: "neutral",
+      metadata,
+      provider: 'fallback-error'
+    };
   }
-  
-  // Analyze voice metrics using Gemini
-  async analyzeVoice(audioData, transcript) {
-    const prompt = `
-      Analyze this interview audio response based on the transcript:
-      
-      Transcript: "${transcript}"
-      
-      Return as JSON with these exact fields:
-      {
-        "confidence": 0.0 (0-1, where 1 is highly confident),
-        "clarity": 0.0 (0-1, where 1 is very clear),
-        "pace": 150 (estimated words per minute, reasonable range 120-200),
-        "pitchStability": 0.0 (0-1, where 1 is very stable),
-        "fillerWords": 0.0 (0-1, where 1 is excessive filler words),
-        "pauses": 0.0 (0-1, where 1 is excessive pausing),
-        "analysis": "brief analysis text"
-      }
-      
-      IMPORTANT: Return ONLY valid JSON. Do not include any additional text.
-    `;
-    
+
+  // Analyze voice metrics using Python voice analysis service
+  async analyzeVoice(audioBuffer) {
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
-      console.log('Voice analysis raw response:', text);
-      
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+      console.log('Sending audio to voice analysis service...');
+
+      const formData = new FormData();
+      formData.append('audio', audioBuffer, {
+        filename: 'audio.wav',
+        contentType: 'audio/wav'
+      });
+
+      const response = await axios.post(`${env.PYTHON_SERVICE_URL}/analyze`, formData, {
+        headers: {
+          ...formData.getHeaders()
+        }
+      });
+
+      if (response.data && response.data.success) {
+        console.log('Voice analysis successful:', response.data.analysis);
+        return response.data.analysis;
       }
-      
+
+      throw new Error(response.data.error || 'Voice analysis failed');
+    } catch (error) {
+      console.error('Error analyzing voice with Python service:', error.message);
+      // Fallback default metrics
       return {
         confidence: 0.5,
         clarity: 0.5,
-        pace: 150,
+        speechRate: 150,
         pitchStability: 0.5,
-        fillerWords: 0.3,
-        pauses: 0.4,
-        analysis: "Average speech patterns detected"
-      };
-    } catch (error) {
-      console.error('Error analyzing voice with Gemini:', error);
-      return {
-        confidence: 0.5,
-        clarity: 0.5,
-        pace: 150,
-        pitchStability: 0.5,
-        fillerWords: 0,
-        pauses: 0,
-        analysis: "Analysis unavailable"
+        volumeConsistency: 0.5,
+        pauseCount: 0,
+        pauseRatio: 0.1,
+        energy: 0.5,
+        tempo: 120,
+        analysis: "Voice analysis fallback used"
       };
     }
   }
-  
-  // Analyze video metrics using Gemini
+
+  // Analyze video metrics using OpenRouter
   async analyzeVideo(videoData, transcript) {
     const prompt = `
       Analyze this interview video response based on typical behavioral cues:
@@ -180,19 +252,14 @@ class AIService {
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text.
     `;
-    
+
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
+      const text = await this.callOpenRouter(prompt);
       console.log('Video analysis raw response:', text);
-      
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      
+
+      const parsed = await this.parseJSONResponse(text);
+      if (parsed) return parsed;
+
       return {
         eyeContact: 0.6,
         attention: 0.7,
@@ -202,7 +269,7 @@ class AIService {
         analysis: "Average video presentation detected"
       };
     } catch (error) {
-      console.error('Error analyzing video with Gemini:', error);
+      console.error('Error analyzing video with OpenRouter:', error);
       return {
         eyeContact: 0.5,
         attention: 0.5,
@@ -213,7 +280,7 @@ class AIService {
       };
     }
   }
-  
+
   // Evaluate single answer
   async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics }) {
     const prompt = `
@@ -246,26 +313,21 @@ class AIService {
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text.
     `;
-    
+
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
+      const text = await this.callOpenRouter(prompt);
       console.log('Evaluation raw response:', text);
-      
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      
+
+      const parsed = await this.parseJSONResponse(text);
+      if (parsed) return parsed;
+
       return this.getDefaultEvaluation();
     } catch (error) {
       console.error('Error evaluating answer:', error);
       return this.getDefaultEvaluation();
     }
   }
-  
+
   // Generate final report
   async generateFinalReport({ candidateName, position, answers, metrics }) {
     // Format answers for prompt
@@ -275,7 +337,7 @@ class AIService {
       Score: ${a.evaluation?.overallScore || 'N/A'}
       Feedback: ${a.evaluation?.feedback || 'No feedback available'}
     `).join('\n');
-    
+
     const prompt = `
       Generate final interview evaluation report for:
       
@@ -313,70 +375,68 @@ class AIService {
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text.
     `;
-    
+
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
-      
+      const text = await this.callOpenRouter(prompt, this.complexModel);
       console.log('Final report raw response:', text);
-      
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
-      }
-      
+
+      const parsed = await this.parseJSONResponse(text);
+      if (parsed) return parsed;
+
       return this.getDefaultReport(candidateName, position);
     } catch (error) {
       console.error('Error generating final report:', error);
       return this.getDefaultReport(candidateName, position);
     }
   }
-  
-  // Helper method to convert text to speech script
-  async textToSpeech(text, voiceProfile = 'professional') {
-    const prompt = `
-      Convert this text into a natural, conversational script for text-to-speech:
-      
-      "${text}"
-      
-      Make it sound natural for a ${voiceProfile} voice profile.
-      Return only the conversational version of the text.
-    `;
-    
+
+  // Convert text to speech using Python gTTS service
+  async textToSpeech(text) {
     try {
-      const result = await this.geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const conversationalText = response.text();
-      
-      return {
-        text: conversationalText,
-        voiceProfile: voiceProfile,
-        originalLength: text.length,
-        conversationalLength: conversationalText.length
-      };
-    } catch (error) {
-      console.error('Error generating speech script:', error);
-      return {
+      console.log('Generating TTS via Python service...');
+      const response = await axios.post(`${env.PYTHON_SERVICE_URL}/tts`, {
         text: text,
-        voiceProfile: 'default'
-      };
-    }
-  }
-  
-  // Get available Gemini models (for debugging)
-  async listAvailableModels() {
-    try {
-      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-      const models = await genAI.listModels();
-      console.log('Available models:', models);
-      return models;
+        lang: 'en'
+      }, {
+        responseType: 'arraybuffer'
+      });
+
+      return Buffer.from(response.data);
     } catch (error) {
-      console.error('Error listing models:', error);
-      return [];
+      console.error('Python TTS error:', error.message);
+
+      // Fallback to minimal translation TTS if Python service fails
+      try {
+        console.log('Attempting secondary fallback TTS...');
+        const url = 'https://translate.google.com/translate_tts';
+        const fallbackResponse = await axios.get(url, {
+          params: {
+            ie: 'UTF-8',
+            tl: 'en',
+            q: text.substring(0, 200),
+            client: 'tw-ob'
+          },
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0'
+          }
+        });
+        return Buffer.from(fallbackResponse.data);
+      } catch (fallbackError) {
+        console.error('All TTS methods failed:', fallbackError.message);
+        return null;
+      }
     }
   }
-  
+
+  async getAudioForText(text) {
+    const audioBuffer = await this.textToSpeech(text);
+    if (audioBuffer) {
+      return audioBuffer.toString('base64');
+    }
+    return null;
+  }
+
   getFallbackQuestions(position, count) {
     const baseQuestions = [
       {
@@ -410,10 +470,10 @@ class AIService {
         difficulty: "medium"
       }
     ];
-    
+
     return baseQuestions.slice(0, count);
   }
-  
+
   getDefaultEvaluation() {
     return {
       technicalAccuracy: 5,
@@ -425,7 +485,7 @@ class AIService {
       feedback: "Average performance. Shows understanding but could benefit from more detailed explanations and confident delivery."
     };
   }
-  
+
   getDefaultReport(candidateName, position) {
     return {
       summary: {

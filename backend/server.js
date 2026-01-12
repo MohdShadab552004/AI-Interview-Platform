@@ -9,6 +9,17 @@ const session = require('express-session');
 const interviewRoutes = require('./routes/interview');
 const aiRoutes = require('./routes/ai');
 
+// Infrastructure
+const fs = require('fs');
+const path = require('path');
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir);
+}
+
+// Background Worker
+require('./queues/analysisQueue');
+
 const app = express();
 const server = http.createServer(app);
 
@@ -56,7 +67,7 @@ app.get('/health', (req, res) => {
 
 // Test endpoint
 app.get('/api/test', (req, res) => {
-  res.json({ 
+  res.json({
     message: 'Server is running!',
     sessionId: req.sessionID,
     timestamp: new Date().toISOString()
@@ -66,16 +77,16 @@ app.get('/api/test', (req, res) => {
 // WebSocket
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
-  
+
   socket.on('join-interview', (interviewId) => {
     socket.join(interviewId);
     console.log(`Socket ${socket.id} joined interview ${interviewId}`);
   });
-  
+
   socket.on('audio-chunk', (data) => {
     socket.to(data.interviewId).emit('audio-chunk', data);
   });
-  
+
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
   });

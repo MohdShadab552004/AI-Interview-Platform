@@ -2,32 +2,99 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import librosa
-import soundfile as sf
 import io
 import tempfile
 import os
+from gtts import gTTS
+from transformers import pipeline
+import torch
+from flask import send_file
+import scipy.signal
+import warnings
+import soundfile as sf
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message="PySoundFile failed")
+warnings.filterwarnings("ignore", message="librosa.core.audio.__audioread_load")
+warnings.filterwarnings("ignore", message="Using `chunk_length_s` is very experimental")
+
+if not hasattr(scipy.signal, 'hann'):
+    try:
+        import scipy.signal.windows
+        scipy.signal.hann = scipy.signal.windows.hann
+    except:
+        pass
 
 app = Flask(__name__)
 CORS(app)
+
+# Load ASR pipeline at startup
+try:
+    print("Loading Transformers ASR pipeline...")
+    device = 0 if torch.cuda.is_available() else -1
+    asr_pipeline = pipeline(
+        "automatic-speech-recognition",
+        model="openai/whisper-base",
+        device=device,
+        chunk_length_s=30,
+        stride_length_s=5,
+        generate_kwargs={"task": "transcribe"}
+    )
+    print(f"ASR pipeline loaded on {'cuda' if device == 0 else 'cpu'}")
+except Exception as e:
+    print(f"Error loading ASR pipeline: {str(e)}")
+    asr_pipeline = None
+
+def load_audio_file(file_path, sample_rate=44100):
+    """Load audio file using soundfile with librosa fallback"""
+    try:
+        # Try using soundfile first (no warnings)
+        y, sr = sf.read(file_path)
+        # Convert to mono if stereo
+        if len(y.shape) > 1:
+            y = np.mean(y, axis=1)
+        # Resample if needed
+        if sr != sample_rate:
+            y = librosa.resample(y, orig_sr=sr, target_sr=sample_rate)
+        return y, sample_rate
+    except Exception as e:
+        # Fallback to librosa
+        try:
+            y, sr = librosa.load(file_path, sr=sample_rate, mono=True)
+            return y, sr
+        except Exception as e2:
+            raise Exception(f"Failed to load audio: {str(e)}, {str(e2)}")
 
 def analyze_audio(audio_data, sample_rate=44100):
     """Analyze audio for speech metrics"""
     try:
         # Load audio from bytes
-        with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
             tmp.write(audio_data)
             tmp_path = tmp.name
         
-        # Load audio file
-        y, sr = librosa.load(tmp_path, sr=sample_rate)
+        # Load audio file with improved function
+        y, sr = load_audio_file(tmp_path, sample_rate)
         
         # Clean up temp file
         os.unlink(tmp_path)
         
         # Calculate speech rate (words per minute estimation)
-        # Extract syllables
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+        tempo_result = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+        
+        # Handle different return types of beat_track (older vs newer librosa versions)
+        if isinstance(tempo_result, tuple):
+            tempo = tempo_result[0]
+        else:
+            tempo = tempo_result
+            
+        # Ensure tempo is a float value
+        if hasattr(tempo, "__len__"):
+            tempo_val = float(tempo[0]) if len(tempo) > 0 else 0
+        else:
+            tempo_val = float(tempo)
         
         # Pitch analysis
         pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
@@ -50,13 +117,13 @@ def analyze_audio(audio_data, sample_rate=44100):
         
         # Calculate metrics
         if duration > 0:
-            speech_rate = len(intervals) / duration * 60  # Approx words per minute
+            speech_rate = len(intervals) / duration * 60
             pause_ratio = total_pause_duration / duration
         else:
             speech_rate = 0
             pause_ratio = 0
         
-        # Confidence score (composite metric)
+        # Confidence score
         confidence_score = calculate_confidence(
             energy_std, 
             pitch_std, 
@@ -64,7 +131,7 @@ def analyze_audio(audio_data, sample_rate=44100):
             speech_rate
         )
         
-        # Clarity score (based on energy consistency)
+        # Clarity score
         clarity_score = 1 - min(energy_std / (energy_mean + 1e-10), 1)
         
         return {
@@ -79,7 +146,7 @@ def analyze_audio(audio_data, sample_rate=44100):
                 "confidence": float(confidence_score),
                 "clarity": float(clarity_score),
                 "energy": float(energy_mean),
-                "tempo": float(tempo[0] if len(tempo) > 0 else 0)
+                "tempo": tempo_val
             }
         }
         
@@ -93,18 +160,15 @@ def analyze_audio(audio_data, sample_rate=44100):
 
 def calculate_confidence(energy_std, pitch_std, pause_ratio, speech_rate):
     """Calculate composite confidence score"""
-    # Normalize metrics
-    energy_score = 1 - min(energy_std / 0.1, 1)  # Lower energy variation is better
-    pitch_score = 1 - min(pitch_std / 50, 1)      # Lower pitch variation is better
-    pause_score = 1 - min(pause_ratio / 0.3, 1)   # Lower pause ratio is better
+    energy_score = 1 - min(energy_std / 0.1, 1)
+    pitch_score = 1 - min(pitch_std / 50, 1)
+    pause_score = 1 - min(pause_ratio / 0.3, 1)
     
-    # Ideal speech rate is 150-180 WPM
     if 150 <= speech_rate <= 180:
         rate_score = 1.0
     else:
         rate_score = 1 - min(abs(speech_rate - 165) / 100, 1)
     
-    # Weighted average
     confidence = (
         0.3 * energy_score +
         0.2 * pitch_score +
@@ -149,6 +213,7 @@ def analyze():
             }), 400
         
         result = analyze_audio(audio_data)
+        print(result)
         return jsonify(result)
         
     except Exception as e:
@@ -164,9 +229,117 @@ def health():
     """Health check endpoint"""
     return jsonify({
         "status": "healthy",
-        "service": "voice-analysis"
+        "service": "voice-analysis",
+        "asr_pipeline_status": "loaded" if asr_pipeline else "not_loaded"
     })
+
+@app.route('/tts', methods=['POST'])
+def tts():
+    """Convert text to speech using gTTS"""
+    try:
+        data = request.get_json()
+        if not data or 'text' not in data:
+            return jsonify({
+                "success": False,
+                "error": "No text provided"
+            }), 400
+        
+        text = data['text']
+        lang = data.get('lang', 'en')
+        
+        # Generate audio using gTTS
+        tts_obj = gTTS(text=text, lang=lang)
+        
+        # Save to a byte stream or temp file
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+            tmp_path = tmp.name
+            tts_obj.save(tmp_path)
+        
+        return send_file(
+            tmp_path,
+            mimetype="audio/mpeg",
+            as_attachment=True,
+            download_name="speech.mp3"
+        )
+        
+    except Exception as e:
+        print(f"TTS error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
+
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    """Transcribe audio to text using Transformers ASR pipeline"""
+    temp_file_path = None
+    try:
+        print("Transcribing audio with pipeline...")
+        if asr_pipeline is None:
+            return jsonify({
+                "success": False,
+                "error": "ASR pipeline not loaded"
+            }), 500
+        
+        if 'audio' not in request.files:
+            return jsonify({
+                "success": False,
+                "error": "No audio file provided"
+            }), 400
+        
+        audio_file = request.files['audio']
+        print(f"Audio file received: {audio_file.filename}")
+        
+        # Get file extension
+        file_ext = os.path.splitext(audio_file.filename)[1].lower()
+        if not file_ext or file_ext not in ['.wav', '.mp3', '.m4a', '.flac', '.ogg', '.webm']:
+            content_type = audio_file.content_type
+            if content_type:
+                if 'wav' in content_type: file_ext = '.wav'
+                elif 'mp3' in content_type or 'mpeg' in content_type: file_ext = '.mp3'
+                elif 'ogg' in content_type: file_ext = '.ogg'
+                elif 'flac' in content_type: file_ext = '.flac'
+                else: file_ext = '.wav'
+        
+        temp_fd, temp_file_path = tempfile.mkstemp(suffix=file_ext)
+        os.close(temp_fd)
+        
+        print(f"Saving audio to: {temp_file_path}")
+        audio_file.save(temp_file_path)
+        
+        if os.path.getsize(temp_file_path) == 0:
+            return jsonify({"success": False, "error": "Audio file is empty"}), 400
+        
+        # Transcribe with pipeline - ignore experimental warnings
+        print(f"Starting pipeline transcription of {temp_file_path}...")
+        result = asr_pipeline(
+            temp_file_path,
+            return_timestamps=False  # Avoid ending timestamp warning
+        )
+        print(f"Transcription complete")
+        print(f"Result: {result}")
+        
+        return jsonify({
+            "success": True,
+            "text": result["text"].strip()
+        })
+        
+    except Exception as e:
+        print(f"Transcription error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            "success": False,
+            "error": f"Transcription failed: {str(e)}"
+        }), 500
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+                print(f"Cleaned up temp file: {temp_file_path}")
+            except: pass
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    # Use a different port if 5001 is in use
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)  # debug=False for production

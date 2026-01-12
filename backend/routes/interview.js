@@ -42,7 +42,11 @@ router.post('/start', async (req, res) => {
 router.post('/submit-answer', upload.single('audio'), async (req, res) => {
   try {
     const { interviewId, questionIndex, videoMetrics } = req.body;
+    console.log('Interview ID:', interviewId);
+    console.log('Question Index:', questionIndex);
+    console.log('Video Metrics:', videoMetrics);
     const audioFile = req.file;
+    console.log('Audio File:', audioFile);
     
     if (!audioFile) {
       return res.status(400).json({ 
