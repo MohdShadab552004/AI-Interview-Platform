@@ -146,6 +146,43 @@ body {
   margin-bottom: 2rem;
 }
 
+/* Text & Code Answer Areas */
+.text-answer-area,
+.code-editor-area {
+  margin-top: 1.5rem;
+  width: 100%;
+}
+
+.answer-textarea {
+  width: 100%;
+  min-height: 150px;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-family: inherit;
+  font-size: 1rem;
+  resize: vertical;
+  background: white;
+  transition: border-color 0.2s;
+}
+
+.answer-textarea:focus {
+  outline: none;
+  border-color: #4299e1;
+  box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.2);
+}
+
+.editor-label {
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+  color: #4a5568;
+}
+
+.code-editor-area .editor-wrapper {
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+
 .question-card {
   background: #f8fafc;
   border: 1px solid #e2e8f0;

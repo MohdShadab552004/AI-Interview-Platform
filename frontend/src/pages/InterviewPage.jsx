@@ -6,6 +6,12 @@ import axios from 'axios';
 import { CountdownCircleTimer } from 'react-countdown-circle-timer';
 import InterviewController from '../components/InterviewController';
 import MediaAnalyzer from '../components/MediaAnalyzer';
+import Editor from 'react-simple-code-editor';
+import { highlight, languages } from 'prismjs/components/prism-core';
+import 'prismjs/components/prism-clike';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/components/prism-python';
+import 'prismjs/themes/prism-tomorrow.css'; // Dark theme
 
 const InterviewPage = () => {
   const { sessionId } = useParams();
@@ -25,6 +31,8 @@ const InterviewPage = () => {
   const [timerKey, setTimerKey] = useState(0);
   const [videoMetrics, setVideoMetrics] = useState({});
   const [audioLevel, setAudioLevel] = useState(0);
+  const [isSetupComplete, setIsSetupComplete] = useState(false);
+  const [isCalibrated, setIsCalibrated] = useState(false);
 
   // API base URL
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
@@ -259,6 +267,16 @@ const InterviewPage = () => {
     formData.append("interviewId", sessionId);
     formData.append("questionIndex", interviewData.currentQuestion);
     formData.append("videoMetrics", JSON.stringify(videoMetrics));
+
+    // Add text/code answers if available
+    if (window.textAnswer) {
+      formData.append("textAnswer", window.textAnswer);
+      window.textAnswer = ''; // Reset
+    }
+    if (window.codeAnswer) {
+      formData.append("codeAnswer", window.codeAnswer);
+      window.codeAnswer = ''; // Reset
+    }
 
     try {
       toast.loading("Processing answer...");
@@ -529,6 +547,26 @@ const InterviewPage = () => {
     }
   };
 
+  // Unified Setup Logic
+  const isSetupMode = interview && !isSetupComplete;
+
+  const setupStyle = {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vw',
+    height: '100vh',
+    backgroundColor: '#1a1a1a',
+    zIndex: 2000,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+  };
+
+  // System Check / Calibration View
+
+
   return (
     <div className="interview-page">
       {/* Loading overlay */}
@@ -552,74 +590,141 @@ const InterviewPage = () => {
 
       <div className="interview-container">
         {/* Left Column - Video & Metrics */}
-        <div className="video-column">
-          <div className="video-container">
+        {/* Left Column - Video & Metrics (Unified Setup/Interview Mode) */}
+        <div className="video-column" style={isSetupMode ? setupStyle : {}}>
+          {isSetupMode && (
+            <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+              <h1 style={{ color: 'white', marginBottom: '0.5rem' }}>System Check</h1>
+              <p style={{ color: '#aaa' }}>Please center your face and ensure your microphone is working.</p>
+            </div>
+          )}
+
+          <div className="video-container" style={{
+            width: '640px',
+            height: '480px',
+            flex: 'none',
+            position: 'relative',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            border: isSetupMode ? '2px solid #333' : 'none',
+            margin: '0 auto' // Center it
+          }}>
             <Webcam
               ref={webcamRef}
-              audio={false} // Let getUserMedia handle audio separately
+              audio={false}
+              mirrored={true}
               screenshotFormat="image/jpeg"
               className="webcam-feed"
+              style={{ width: '100%', height: '100%' }} // Fill the 640x480 container
               videoConstraints={{
-                width: { ideal: 640, max: 1280 },
-                height: { ideal: 480, max: 720 },
+                width: 640,
+                height: 480,
                 facingMode: "user",
                 frameRate: { ideal: 30 }
               }}
-              onUserMedia={(stream) => {
-                console.log("Webcam stream ready:", stream);
-              }}
-              onUserMediaError={(err) => {
-                console.error("Webcam error:", err);
-                toast.error(`Camera error: ${err.message}`);
-              }}
+              onUserMedia={(stream) => console.log("Webcam ready")}
+              onUserMediaError={(err) => toast.error(`Camera error: ${err.message}`)}
             />
 
             <MediaAnalyzer
               webcamRef={webcamRef}
               onMetricsUpdate={setVideoMetrics}
               onAudioLevel={setAudioLevel}
+              onCalibrationComplete={() => setIsCalibrated(true)}
+              skipCalibration={false}
             />
 
-            {/* Audio Level Indicator */}
-            <div className="audio-level">
-              <div
-                className="audio-bar"
-                style={{ width: `${Math.min(100, audioLevel * 100)}%` }}
-              />
-              <span>Audio Level: {Math.round(audioLevel * 100)}%</span>
-            </div>
+            {/* Audio Indicator (Mini - Interview Mode) */}
+            {!isSetupMode && (
+              <div className="audio-level">
+                <div
+                  className="audio-bar"
+                  style={{ width: `${Math.min(100, audioLevel * 100)}%` }}
+                />
+                <span>Audio Level: {Math.round(audioLevel * 100)}%</span>
+              </div>
+            )}
+
+            {/* Smart Proctor Analysis Overlay (Interview Mode) */}
+            {!isSetupMode && videoMetrics.detectedObjects && videoMetrics.detectedObjects.length > 0 && (
+              <div style={{ position: 'absolute', top: 10, right: 10, background: 'red', color: 'white', padding: '5px 10px', borderRadius: '4px', fontWeight: 'bold' }}>
+                ⚠️ Detected: {videoMetrics.detectedObjects.join(', ')}
+              </div>
+            )}
+
+            {!isSetupMode && (videoMetrics.gazePattern === 'suspicious_side' || videoMetrics.gazePattern === 'suspicious_side_eye') ? (
+              <div style={{ position: 'absolute', top: 50, right: 10, background: 'orange', color: 'white', padding: '5px 10px', borderRadius: '4px', fontWeight: 'bold' }}>
+                ⚠️ Suspicious Gaze Detected
+              </div>
+            ) : null}
           </div>
 
-          {/* Metrics Display */}
-          <div className="metrics-display">
-            <h3>Live Metrics</h3>
-            <div className="metrics-grid">
-              <div className="metric">
-                <span className="metric-label">Attention</span>
-                <span className="metric-value">
-                  {videoMetrics.attention ? Math.round(videoMetrics.attention * 100) : '0'}%
-                </span>
+          {/* Setup Controls */}
+          {isSetupMode && (
+            <div style={{ marginTop: '2rem', width: '640px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#333', padding: '15px', borderRadius: '8px' }}>
+                <span style={{ color: 'white' }}>Microphone Level</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ width: '200px', height: '10px', background: '#000', borderRadius: '5px', overflow: 'hidden' }}>
+                    <div style={{ width: `${audioLevel * 100}%`, height: '100%', background: '#4CAF50', transition: 'width 0.1s' }} />
+                  </div>
+                  <span style={{ color: '#aaa', minWidth: '40px' }}>{Math.round(audioLevel * 100)}%</span>
+                </div>
               </div>
-              <div className="metric">
-                <span className="metric-label">Eye Contact</span>
-                <span className="metric-value">
-                  {videoMetrics.eyeContact ? Math.round(videoMetrics.eyeContact * 100) : '0'}%
-                </span>
-              </div>
-              <div className="metric">
-                <span className="metric-label">Confidence</span>
-                <span className="metric-value">
-                  {videoMetrics.confidence ? Math.round(videoMetrics.confidence * 100) : '0'}%
-                </span>
-              </div>
-              <div className="metric">
-                <span className="metric-label">Questions</span>
-                <span className="metric-value">
-                  {interview?.metrics?.completedQuestions || 0}/{interview?.metrics?.totalQuestions || 0}
-                </span>
+
+              <button
+                disabled={!isCalibrated}
+                onClick={() => setIsSetupComplete(true)}
+                style={{
+                  padding: '16px',
+                  fontSize: '18px',
+                  fontWeight: 'bold',
+                  background: isCalibrated ? '#4CAF50' : '#444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: isCalibrated ? 'pointer' : 'not-allowed',
+                  opacity: isCalibrated ? 1 : 0.7,
+                  transition: 'all 0.3s'
+                }}
+              >
+                {isCalibrated ? "Start Interview" : "Calibrating Face ID..."}
+              </button>
+            </div>
+          )}
+
+          {/* Metrics Display (Interview Mode Only) */}
+          {!isSetupMode && (
+            <div className="metrics-display">
+              <h3>Live Proctoring Features</h3>
+              <div className="metrics-grid">
+                <div className="metric">
+                  <span className="metric-label">Attention</span>
+                  <span className="metric-value">
+                    {videoMetrics.attention ? Math.round(videoMetrics.attention * 100) : '0'}%
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Eye Contact</span>
+                  <span className="metric-value">
+                    {videoMetrics.eyeContact ? Math.round(videoMetrics.eyeContact * 100) : '0'}%
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Stress Level</span>
+                  <span className="metric-value" style={{ color: videoMetrics.stress > 0.5 ? 'red' : 'green' }}>
+                    {videoMetrics.stress ? Math.round(videoMetrics.stress * 100) : '0'}%
+                  </span>
+                </div>
+                <div className="metric">
+                  <span className="metric-label">Network Quality</span>
+                  <span className="metric-value" style={{ color: videoMetrics.networkQuality < 0.5 ? 'red' : 'green' }}>
+                    {videoMetrics.networkQuality ? Math.round(videoMetrics.networkQuality * 100) : '100'}%
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right Column - Questions & Controls */}
@@ -669,11 +774,47 @@ const InterviewPage = () => {
                 {!isPlaying && !isRecording && (
                   <div className="ready-status">
                     <p>Ready to record answer</p>
+
+                    {/* Text Answer Input */}
+                    {/* Text Answer Input - Updated for new types */}
+                    {(currentQuestion.type === 'cv-analysis' || currentQuestion.type === 'technical-problem' || currentQuestion.type === 'behavioral' || currentQuestion.type === 'general') && (
+                      <div className="text-answer-area">
+                        <textarea
+                          placeholder="Type your answer here (optional if speaking)..."
+                          className="answer-textarea"
+                          onChange={(e) => window.textAnswer = e.target.value}
+                        />
+                      </div>
+                    )}
+
+                    {/* Code Editor for coding questions */}
+                    {currentQuestion.type === 'code' && (
+                      <div className="code-editor-area">
+                        <p className="editor-label">Code Editor ({currentQuestion.language || 'Any Language'})</p>
+                        <div className="editor-wrapper" style={{ border: '1px solid #444', borderRadius: '4px', background: '#1e1e1e' }}>
+                          <Editor
+                            value={window.codeAnswer || ''}
+                            onValueChange={code => {
+                              window.codeAnswer = code;
+                            }}
+                            highlight={code => highlight(code, languages.javascript || languages.html)}
+                            padding={10}
+                            style={{
+                              fontFamily: '"Fira code", "Fira Mono", monospace',
+                              fontSize: 14,
+                              minHeight: '200px',
+                              color: '#fff'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+
                     <button
                       onClick={startRecording}
                       className="start-button"
                     >
-                      Start Recording
+                      Start Answering
                     </button>
                   </div>
                 )}

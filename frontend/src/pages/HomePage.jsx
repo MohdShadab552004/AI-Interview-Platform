@@ -8,35 +8,19 @@ const HomePage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    candidateName: '',
-    email: '',
-    position: 'React Developer',
+    candidateName: 'Guest Candidate',
+    email: 'guest@example.com',
+    position: 'General Developer',
     experienceLevel: 'Mid-level',
     company: '',
     jobId: '',
   });
 
   // Available positions
-  const positions = [
-    'React Developer',
-    'Frontend Developer',
-    'Full Stack Developer',
-    'Backend Developer',
-    'Software Engineer',
-    'DevOps Engineer',
-    'Data Scientist',
-    'Product Manager'
-  ];
+  const positions = [];
 
   // Experience levels
-  const experienceLevels = [
-    'Entry-level',
-    'Junior',
-    'Mid-level',
-    'Senior',
-    'Lead',
-    'Principal'
-  ];
+  const experienceLevels = [];
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
@@ -49,16 +33,8 @@ const HomePage = () => {
   };
 
   const validateForm = () => {
-    if (!formData.candidateName.trim()) {
-      toast.error('Please enter your name');
-      return false;
-    }
-    if (!formData.email.trim()) {
-      toast.error('Please enter your email');
-      return false;
-    }
-    if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      toast.error('Please enter a valid email');
+    if (!formData.cvFile) {
+      toast.error('Please upload your CV');
       return false;
     }
     return true;
@@ -66,37 +42,45 @@ const HomePage = () => {
 
   const startInterview = async (e) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setLoading(true);
-    
+
     try {
       toast.loading('Preparing your interview...');
-      
-      const response = await axios.post(`${API_BASE}/interview/start`, {
-        candidateName: formData.candidateName,
-        email: formData.email,
-        position: formData.position,
-        experienceLevel: formData.experienceLevel,
-        company: formData.company,
-        jobId: formData.jobId,
+
+      const formPayload = new FormData();
+      formPayload.append('candidateName', formData.candidateName);
+      formPayload.append('email', formData.email);
+      formPayload.append('position', formData.position);
+      formPayload.append('experienceLevel', formData.experienceLevel);
+      formPayload.append('company', formData.company);
+      formPayload.append('jobId', formData.jobId);
+
+      if (formData.cvFile) {
+        formPayload.append('cv', formData.cvFile);
+      }
+
+      const response = await axios.post(`${API_BASE}/interview/start`, formPayload, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
       });
-      
+
       toast.dismiss();
-      
+
       if (response.data.success) {
         toast.success('Interview session created!');
-        
-        // Save to localStorage for future reference
+
+        // Save to localStorage
         localStorage.setItem('currentInterview', JSON.stringify({
           sessionId: response.data.interview.id,
           candidateName: formData.candidateName,
           email: formData.email,
           position: formData.position
         }));
-        
-        // Navigate to interview page
+
         navigate(`/interview/${response.data.sessionId}`);
       } else {
         toast.error(response.data.error || 'Failed to start interview');
@@ -104,14 +88,21 @@ const HomePage = () => {
     } catch (error) {
       toast.dismiss();
       console.error('Error starting interview:', error);
-      
-      if (error.response?.data?.error) {
-        toast.error(error.response.data.error);
-      } else {
-        toast.error('Network error. Please try again.');
-      }
+      toast.error(error.response?.data?.error || 'Network error. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.type === "application/pdf") {
+        setFormData(prev => ({ ...prev, cvFile: file }));
+        toast.success("CV Uploaded");
+      } else {
+        toast.error("Please upload a PDF file");
+      }
     }
   };
 
@@ -121,10 +112,10 @@ const HomePage = () => {
         video: true,
         audio: true
       });
-      
+
       // Stop all tracks
       stream.getTracks().forEach(track => track.stop());
-      
+
       toast.success('Camera and microphone are working!');
       return true;
     } catch (error) {
@@ -142,7 +133,7 @@ const HomePage = () => {
             AI-Powered <span className="highlight">Technical Interviews</span>
           </h1>
           <p className="hero-subtitle">
-            Experience the future of hiring. Get evaluated by our AI interview system 
+            Experience the future of hiring. Get evaluated by our AI interview system
             with real-time feedback and comprehensive analysis.
           </p>
           <div className="hero-stats">
@@ -172,8 +163,8 @@ const HomePage = () => {
               <span className="metric">🎤 Voice</span>
               <span className="metric">📊 Analysis</span>
             </div>
+          </div>
         </div>
-      </div>
       </header>
 
       {/* Main Content */}
@@ -186,103 +177,38 @@ const HomePage = () => {
           </div>
 
           <form onSubmit={startInterview} className="interview-form">
-            <div className="form-grid">
-              <div className="form-group">
-                <label htmlFor="candidateName">
-                  Full Name *
-                </label>
+            <div className="form-group">
+              <label htmlFor="cv">
+                Upload CV (PDF) *
+              </label>
+              <div className="file-upload-wrapper">
                 <input
-                  type="text"
-                  id="candidateName"
-                  name="candidateName"
-                  value={formData.candidateName}
-                  onChange={handleInputChange}
-                  placeholder="Enter your full name"
-                  required
+                  type="file"
+                  id="cv"
+                  accept=".pdf"
+                  onChange={handleFileChange}
                   disabled={loading}
+                  className="file-input"
                 />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="email">
-                  Email Address *
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  placeholder="Enter your email"
-                  required
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="position">
-                  Position Applying For *
-                </label>
-                <select
-                  id="position"
-                  name="position"
-                  value={formData.position}
-                  onChange={handleInputChange}
-                  disabled={loading}
-                >
-                  {positions.map((pos) => (
-                    <option key={pos} value={pos}>{pos}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="experienceLevel">
-                  Experience Level *
-                </label>
-                <select
-                  id="experienceLevel"
-                  name="experienceLevel"
-                  value={formData.experienceLevel}
-                  onChange={handleInputChange}
-                  disabled={loading}
-                >
-                  {experienceLevels.map((level) => (
-                    <option key={level} value={level}>{level}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="company">
-                  Company (Optional)
-                </label>
-                <input
-                  type="text"
-                  id="company"
-                  name="company"
-                  value={formData.company}
-                  onChange={handleInputChange}
-                  placeholder="Company name"
-                  disabled={loading}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="jobId">
-                  Job ID (Optional)
-                </label>
-                <input
-                  type="text"
-                  id="jobId"
-                  name="jobId"
-                  value={formData.jobId}
-                  onChange={handleInputChange}
-                  placeholder="Job reference ID"
-                  disabled={loading}
-                />
+                {formData.cvFile && <span className="file-name">✅ {formData.cvFile.name}</span>}
               </div>
             </div>
+
+            <div className="form-group">
+              <label htmlFor="jobId">
+                Interview ID (Optional)
+              </label>
+              <input
+                type="text"
+                id="jobId"
+                name="jobId"
+                value={formData.jobId}
+                onChange={handleInputChange}
+                placeholder="Enter Interview ID"
+                disabled={loading}
+              />
+            </div>
+
 
             <div className="form-actions">
               <button
@@ -431,16 +357,16 @@ const HomePage = () => {
             <h2>AI Interview</h2>
             <p>Revolutionizing technical hiring</p>
           </div>
-          
+
           <div className="footer-links">
             <a href="/privacy">Privacy Policy</a>
             <a href="/terms">Terms of Service</a>
             <a href="/contact">Contact Support</a>
           </div>
-          
+
           <div className="footer-cta">
             <p>Ready to start your interview journey?</p>
-            <button 
+            <button
               className="btn-footer-start"
               onClick={() => document.querySelector('.setup-section').scrollIntoView({ behavior: 'smooth' })}
             >
@@ -448,12 +374,12 @@ const HomePage = () => {
             </button>
           </div>
         </div>
-        
+
         <div className="footer-bottom">
           <p>© {new Date().getFullYear()} AI Interview System. All rights reserved.</p>
         </div>
       </footer>
-    </div>
+    </div >
   );
 };
 

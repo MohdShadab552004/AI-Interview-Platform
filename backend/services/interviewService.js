@@ -30,23 +30,34 @@ class InterviewService {
     this.interviews = new Map();
   }
 
-  async createInterview({ candidateName, position, experienceLevel, userId }) {
+  async createInterview({ candidateName, position, experienceLevel, userId, cvBuffer }) {
     const interviewId = uuidv4();
     const timestamp = Date.now();
 
-    // Generate questions for this interview
-    const questions = await aiService.generateQuestions(position, experienceLevel);
+    let questions = [];
+
+    if (cvBuffer) {
+      // CV-based flow - NEW Full 25-Question Structure
+      const cvText = await aiService.extractTextFromPDF(cvBuffer);
+
+      // Generate all 25 questions in one go logic
+      questions = await aiService.generateFullInterview(cvText, 25);
+    } else {
+      // Fallback old flow (without CV)
+      questions = await aiService.generateQuestions(position, experienceLevel, 5);
+    }
 
     const formattedQuestions = questions.map((q, i) => ({
       id: i,
       text: q.question,
-      type: q.type,
+      type: q.type || 'general', // 'theory', 'code', 'technical-explanation'
       expectedTime: q.expectedTime || 120, // seconds
       answer: null,
       transcription: null,
       voiceAnalysis: null,
       videoMetrics: null,
-      aiEvaluation: null
+      aiEvaluation: null,
+      language: q.language || null // for coding questions
     }));
 
     // Attach audio to the first question
@@ -121,7 +132,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -134,15 +145,30 @@ class InterviewService {
 
     const question = interview.questions[questionIndex];
 
-    // 1. Save audio to temporary file for background processing
-    const fs = require('fs').promises;
-    const path = require('path');
-    const tempFileName = `audio_${interviewId}_${questionIndex}_${Date.now()}.webm`;
-    const tempPath = path.join(__dirname, '../uploads', tempFileName);
+    // Handle Audio (if present)
+    let audioPath = null;
+    if (audioBuffer) {
+      // 1. Save audio to temporary file for background processing
+      const fs = require('fs').promises;
+      const path = require('path');
+      const tempFileName = `audio_${interviewId}_${questionIndex}_${Date.now()}.webm`;
+      const tempPath = path.join(__dirname, '../uploads', tempFileName);
 
-    await fs.writeFile(tempPath, audioBuffer);
+      await fs.writeFile(tempPath, audioBuffer);
+      audioPath = tempPath;
+    }
 
-    // 2. Enqueue analysis job
+    // Store non-audio answers immediately
+    if (textAnswer) {
+      question.answer = textAnswer;
+      question.type = 'text';
+    } else if (codeAnswer) {
+      question.answer = codeAnswer;
+      question.type = 'code';
+    } else if (!audioBuffer) {
+      console.warn("No answer content provided");
+    }
+
     // 2. Enqueue analysis job
     const { analysisQueue, processJob } = require('../queues/analysisQueue');
 
@@ -150,9 +176,11 @@ class InterviewService {
       await analysisQueue.add({
         interviewId,
         questionIndex,
-        audioPath: tempPath,
+        audioPath,
         audioMimeType,
-        videoMetrics
+        videoMetrics,
+        textAnswer,
+        codeAnswer
       }, {
         attempts: 3,
         backoff: 5000
@@ -161,13 +189,14 @@ class InterviewService {
     } else {
       // Fallback: Process immediately (background async)
       console.log(`[Queue] Redis not connected. Processing ${interviewId} Q${questionIndex} directly.`);
-      // Don't await this, let it run in background like a job
       processJob({
         interviewId,
         questionIndex,
-        audioPath: tempPath,
+        audioPath,
         audioMimeType,
-        videoMetrics
+        videoMetrics,
+        textAnswer,
+        codeAnswer
       }).catch(err => console.error('Direct processing error:', err));
     }
 

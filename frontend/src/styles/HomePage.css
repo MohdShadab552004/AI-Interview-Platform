@@ -112,7 +112,9 @@
 }
 
 @keyframes spin {
-  to { transform: translate(-50%, -50%) rotate(360deg); }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 
 .preview-metrics {
@@ -178,7 +180,7 @@
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 2rem;
   margin-bottom: 2rem;
 }
@@ -220,6 +222,23 @@
 
 .form-group input::placeholder {
   color: #a0aec0;
+}
+
+.file-upload-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.file-input {
+  padding: 0.5rem !important;
+  background: white;
+}
+
+.file-name {
+  font-size: 0.9rem;
+  color: #48bb78;
+  font-weight: 600;
 }
 
 .form-actions {
@@ -512,11 +531,11 @@
     text-align: center;
     padding: 3rem 1rem;
   }
-  
+
   .hero-stats {
     grid-template-columns: repeat(2, 1fr);
   }
-  
+
   .hero-visual {
     flex: 0 0 auto;
     width: 100%;
@@ -528,20 +547,20 @@
   .hero-title {
     font-size: 2.5rem;
   }
-  
+
   .hero-stats {
     grid-template-columns: 1fr;
   }
-  
+
   .form-actions {
     flex-direction: column;
   }
-  
+
   .footer-content {
     flex-direction: column;
     text-align: center;
   }
-  
+
   .footer-links {
     flex-direction: column;
     gap: 1rem;
@@ -552,7 +571,7 @@
   .interview-form {
     padding: 2rem 1rem;
   }
-  
+
   .feature-card,
   .testimonial-card {
     padding: 1.5rem;

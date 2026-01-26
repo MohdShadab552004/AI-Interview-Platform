@@ -12,28 +12,29 @@ const upload = multer({
 });
 
 // Start new interview
-router.post('/start', async (req, res) => {
+router.post('/start', upload.single('cv'), async (req, res) => {
   try {
     const { candidateName, position, experienceLevel } = req.body;
-    
+
     const interview = await interviewService.createInterview({
       candidateName,
       position: position || 'React Developer',
       experienceLevel: experienceLevel || 'Mid-level',
-      userId: req.session.userId || 'anonymous'
+      userId: req.session.userId || 'anonymous',
+      cvBuffer: req.file ? req.file.buffer : null
     });
-    
+
     req.session.interviewId = interview.id;
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       interview,
       sessionId: interview.id
     });
   } catch (error) {
     console.error('Error starting interview:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to start interview' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start interview'
     });
   }
 });
@@ -41,28 +42,29 @@ router.post('/start', async (req, res) => {
 // Submit answer (audio + metrics)
 router.post('/submit-answer', upload.single('audio'), async (req, res) => {
   try {
-    const { interviewId, questionIndex, videoMetrics } = req.body;
+    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer } = req.body;
     console.log('Interview ID:', interviewId);
     console.log('Question Index:', questionIndex);
-    console.log('Video Metrics:', videoMetrics);
+
     const audioFile = req.file;
-    console.log('Audio File:', audioFile);
-    
-    if (!audioFile) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'No audio file provided' 
+
+    if (!audioFile && !textAnswer && !codeAnswer) {
+      return res.status(400).json({
+        success: false,
+        error: 'No answer provided (audio, text, or code)'
       });
     }
-    
+
     const result = await interviewService.processAnswer({
       interviewId,
       questionIndex: parseInt(questionIndex),
-      audioBuffer: audioFile.buffer,
-      audioMimeType: audioFile.mimetype,
-      videoMetrics: JSON.parse(videoMetrics || '{}')
+      audioBuffer: audioFile ? audioFile.buffer : null,
+      audioMimeType: audioFile ? audioFile.mimetype : null,
+      videoMetrics: JSON.parse(videoMetrics || '{}'),
+      textAnswer,
+      codeAnswer
     });
-    
+
     res.json({
       success: true,
       nextQuestion: result.nextQuestion,
@@ -71,9 +73,9 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
     });
   } catch (error) {
     console.error('Error submitting answer:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to process answer' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process answer'
     });
   }
 });
@@ -82,23 +84,23 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
 router.get('/status/:interviewId', async (req, res) => {
   try {
     const interview = await interviewService.getInterview(req.params.interviewId);
-    
+
     if (!interview) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Interview not found' 
+      return res.status(404).json({
+        success: false,
+        error: 'Interview not found'
       });
     }
-    
-    res.json({ 
-      success: true, 
-      interview 
+
+    res.json({
+      success: true,
+      interview
     });
   } catch (error) {
     console.error('Error getting interview status:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to get interview status' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to get interview status'
     });
   }
 });
@@ -107,16 +109,16 @@ router.get('/status/:interviewId', async (req, res) => {
 router.post('/end/:interviewId', async (req, res) => {
   try {
     const finalReport = await interviewService.endInterview(req.params.interviewId);
-    
+
     res.json({
       success: true,
       report: finalReport
     });
   } catch (error) {
     console.error('Error ending interview:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Failed to end interview' 
+    res.status(500).json({
+      success: false,
+      error: 'Failed to end interview'
     });
   }
 });
