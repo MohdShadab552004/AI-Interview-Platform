@@ -47,8 +47,9 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
     console.log('Question Index:', questionIndex);
 
     const audioFile = req.file;
+    const { skipped } = req.body;
 
-    if (!audioFile && !textAnswer && !codeAnswer) {
+    if (!audioFile && !textAnswer && !codeAnswer && skipped !== 'true') {
       return res.status(400).json({
         success: false,
         error: 'No answer provided (audio, text, or code)'

@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
-import {
-  Radar,
-  Bar,
-  Doughnut
-} from 'react-chartjs-2';
+import { Radar } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
   RadialLinearScale,
@@ -20,8 +16,8 @@ import {
   ArcElement
 } from 'chart.js';
 import toast from 'react-hot-toast';
+import { FiDownload, FiHome, FiAward, FiCheckCircle, FiXCircle, FiTrendingUp } from 'react-icons/fi';
 
-// Register ChartJS components
 ChartJS.register(
   RadialLinearScale,
   PointElement,
@@ -45,14 +41,8 @@ const ResultsPage = () => {
 
   useEffect(() => {
     fetchResults();
-
-    // Set up polling if data is still processing
-    const interval = setInterval(() => {
-      checkStatus();
-    }, 5000);
-
+    const interval = setInterval(checkStatus, 5000);
     setRefreshInterval(interval);
-
     return () => clearInterval(interval);
   }, [sessionId]);
 
@@ -60,13 +50,9 @@ const ResultsPage = () => {
     try {
       setLoading(true);
       const response = await axios.get(`${API_BASE}/interview/status/${sessionId}`);
-
-      if (response.data.success) {
-        setInterview(response.data.interview);
-      }
+      if (response.data.success) setInterview(response.data.interview);
     } catch (error) {
       toast.error('Failed to load results');
-      console.error('Error fetching results:', error);
     } finally {
       setLoading(false);
     }
@@ -78,13 +64,9 @@ const ResultsPage = () => {
       if (response.data.success) {
         const data = response.data.interview;
         setInterview(data);
-
-        // If final evaluation is ready, stop polling
-        if (data.finalEvaluation) {
-          if (refreshInterval) {
-            clearInterval(refreshInterval);
-            setRefreshInterval(null);
-          }
+        if (data.finalEvaluation && refreshInterval) {
+          clearInterval(refreshInterval);
+          setRefreshInterval(null);
         }
       }
     } catch (error) {
@@ -94,19 +76,20 @@ const ResultsPage = () => {
 
   if (loading) {
     return (
-      <div className="loading-container">
-        <div className="spinner"></div>
-        <p>Loading your interview data...</p>
+      <div className="loading-overlay">
+        <div className="loading-spinner-large"></div>
+        <p>Analyzing Results...</p>
       </div>
     );
   }
 
   if (!interview) {
     return (
-      <div className="no-results">
-        <h2>Interview not found</h2>
-        <p>Could not find the requested interview session.</p>
-        <button onClick={() => window.location.href = '/'}>Go Home</button>
+      <div className="results-page">
+        <div className="setup-card">
+          <h2>Interview Not Found</h2>
+          <button className="btn-primary" onClick={() => window.location.href = '/'}>Go Home</button>
+        </div>
       </div>
     );
   }
@@ -114,207 +97,125 @@ const ResultsPage = () => {
   const report = interview.finalEvaluation;
   const isPending = !report;
 
-  // Prepare chart data if report exists
   const radarData = report ? {
-    labels: ['Technical', 'Problem Solving', 'Communication', 'Confidence', 'Overall'],
-    datasets: [
-      {
-        label: 'Your Scores',
-        data: [
-          report.detailedBreakdown?.technicalSkills?.score || 0,
-          report.detailedBreakdown?.problemSolving?.score || 0,
-          report.detailedBreakdown?.communication?.score || 0,
-          report.detailedBreakdown?.confidence?.score || 0,
-          report.summary?.overallScore / 10 || 0
-        ],
-        backgroundColor: 'rgba(54, 162, 235, 0.2)',
-        borderColor: 'rgba(54, 162, 235, 1)',
-        borderWidth: 2
-      }
-    ]
+    labels: ['Technical', 'Logic', 'Comm.', 'Confidence', 'Overall'],
+    datasets: [{
+      label: 'Performance',
+      data: [
+        report.detailedBreakdown?.technicalSkills?.score || 0,
+        report.detailedBreakdown?.problemSolving?.score || 0,
+        report.detailedBreakdown?.communication?.score || 0,
+        report.detailedBreakdown?.confidence?.score || 0,
+        report.summary?.overallScore / 10 || 0
+      ],
+      backgroundColor: 'rgba(99, 102, 241, 0.2)',
+      borderColor: '#6366f1',
+      borderWidth: 3,
+      pointBackgroundColor: '#6366f1'
+    }]
   } : null;
-
-  const recommendationColors = {
-    'Strong Hire': '#10B981',
-    'Hire': '#34D399',
-    'No Hire': '#F59E0B',
-    'Strong No Hire': '#EF4444'
-  };
 
   return (
     <div className="results-page">
-      <div className="results-header">
-        <h1>Interview Report</h1>
-        <p className="session-id">Candidate: {interview.candidateName} | Position: {interview.position}</p>
-      </div>
+      <header className="interview-header" style={{ marginBottom: '4rem' }}>
+        <div className="badge">AI Performance Report</div>
+        <h1>Interview Comprehensive Analysis</h1>
+        <p>{interview.candidateName} | {interview.position}</p>
+      </header>
 
       {isPending ? (
-        <div className="pending-analysis-card">
-          <div className="loading-spinner-small"></div>
-          <h2>Analysis in Progress...</h2>
-          <p>Our AI is analyzing your responses. This page will update automatically as results become available.</p>
-          <div className="processing-progress">
+        <div className="setup-card" style={{ margin: '0 auto' }}>
+          <div className="loading-spinner-large" style={{ margin: '0 auto 2rem' }}></div>
+          <h2>AI Evaluation in Progress</h2>
+          <p>Our deep learning models are analyzing your speech, code, and behavioral patterns. This usually takes 30-60 seconds.</p>
+          <div className="q-progress" style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', marginTop: '2rem' }}>
             {interview.questions.map((q, i) => (
-              <div key={i} className={`q-status-dot ${q.transcription ? 'completed' : 'pending'}`}>
-                Q{i + 1}
-              </div>
+              <div key={i} className={`q-dot ${q.transcription ? 'done' : 'wait'}`} style={{
+                width: '40px', height: '40px', borderRadius: '10px',
+                background: q.transcription ? 'var(--color-primary)' : 'rgba(255,255,255,0.05)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.8rem', fontWeight: 'bold'
+              }}>Q{i + 1}</div>
             ))}
           </div>
         </div>
       ) : (
         <>
-          {/* Summary Card */}
           <div className="summary-card">
-            <div className="summary-main">
+            <div className="summary-main" style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4rem', alignItems: 'center' }}>
               <div className="score-display">
-                <h2>Overall Score</h2>
                 <div className="score-circle">
-                  <span className="score-number">{report.summary?.overallScore || 0}</span>
-                  <span className="score-label">/100</span>
+                  <span className="score-number">{report.summary?.overallScore}</span>
+                  <span className="score-label">INDEX</span>
                 </div>
-                <div
-                  className="recommendation-badge"
-                  style={{
-                    backgroundColor: recommendationColors[report.summary?.recommendation] || '#6B7280'
-                  }}
-                >
-                  {report.summary?.recommendation || 'Evaluated'}
+                <div className="recommendation-badge" style={{ marginTop: '1.5rem', background: 'rgba(255,255,255,0.1)' }}>
+                  {report.summary?.recommendation}
                 </div>
               </div>
-
-              <div className="decision-section">
-                <h3>Executive Summary</h3>
-                <p className="final-feedback">{report.finalFeedback}</p>
-                <div className="recommendation-text">
-                  <strong>Recommendation:</strong> {report.summary?.recommendation}
-                </div>
+              <div className="feedback-text">
+                <h3 style={{ fontSize: '1.8rem', marginBottom: '1.5rem' }}>Executive Summary</h3>
+                <p style={{ fontSize: '1.1rem', lineHeight: '1.7', opacity: 0.9 }}>{report.finalFeedback}</p>
               </div>
             </div>
           </div>
 
-          {/* Charts Section */}
-          {radarData && (
-            <div className="charts-section">
-              <div className="chart-container">
-                <h3>Performance Breakdown</h3>
-                <Radar
-                  data={radarData}
-                  options={{
-                    scales: {
-                      r: {
-                        beginAtZero: true,
-                        max: 10,
-                        ticks: { stepSize: 2 }
-                      }
-                    }
-                  }}
-                />
+          <div className="charts-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '4rem' }}>
+            <div className="chart-container">
+              <h3>Performance Spectrum</h3>
+              <Radar data={radarData} options={{
+                scales: { r: { beginAtZero: true, max: 10, ticks: { display: false }, grid: { color: 'rgba(255,255,255,0.1)' }, angleLines: { color: 'rgba(255,255,255,0.1)' }, pointLabels: { color: '#94a3b8', font: { size: 12 } } } },
+                plugins: { legend: { display: false } }
+              }} />
+            </div>
+            <div className="insights-box" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <div className="qa-metric" style={{ textAlign: 'left', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <FiAward size={24} color="var(--color-primary)" style={{ marginBottom: '1rem' }} />
+                <label>Key Competitive Advantage</label>
+                <p style={{ fontSize: '1rem', color: 'white' }}>{report.strengths?.[0]}</p>
               </div>
-
-              <div className="swot-section-mini">
-                <div className="strengths-weaknesses">
-                  <div className="sw-box strength">
-                    <h4>Key Strengths</h4>
-                    <ul>
-                      {report.strengths?.slice(0, 3).map((s, i) => <li key={i}>{s}</li>)}
-                    </ul>
-                  </div>
-                  <div className="sw-box improvement">
-                    <h4>Top Improvements</h4>
-                    <ul>
-                      {report.weaknesses?.slice(0, 3).map((w, i) => <li key={i}>{w}</li>)}
-                    </ul>
-                  </div>
-                </div>
+              <div className="qa-metric" style={{ textAlign: 'left', background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <FiTrendingUp size={24} color="var(--color-accent)" style={{ marginBottom: '1rem' }} />
+                <label>Primary Growth Area</label>
+                <p style={{ fontSize: '1rem', color: 'white' }}>{report.weaknesses?.[0]}</p>
               </div>
             </div>
-          )}
-        </>
-      )}
+          </div>
 
-      {/* Question by Question Analysis */}
-      <div className="questions-analysis-section">
-        <h2>Question-by-Question Analysis</h2>
-        <div className="questions-list">
-          {interview.questions.map((q, index) => (
-            <div key={index} className="question-analysis-card">
-              <div className="qa-header">
-                <h3>Question {index + 1}</h3>
-                <span className="qa-type">{q.type}</span>
-              </div>
-              <p className="qa-text">"{q.text}"</p>
-
-              {!q.transcription ? (
-                <div className="qa-pending">
-                  <div className="loading-spinner-tiny"></div>
-                  <span>Analyzing response...</span>
-                </div>
-              ) : (
-                <div className="qa-details">
-                  <div className="qa-transcription">
-                    <h4>Your Answer:</h4>
-                    <p>{q.transcription.text}</p>
+          <div className="detailed-analysis">
+            <h2 style={{ marginBottom: '2rem' }}>Section Breakdown</h2>
+            {interview.questions.map((q, i) => (
+              <div key={i} className="question-analysis-card">
+                <div className="qa-header">
+                  <h3>Question {i + 1} <span style={{ opacity: 0.3, fontSize: '0.9rem', marginLeft: '1rem' }}>{q.type.toUpperCase()}</span></h3>
+                  <div className="qa-score-pill" style={{ background: 'var(--color-primary)', padding: '0.25rem 1rem', borderRadius: '100px', fontSize: '0.8rem', fontWeight: 'bold' }}>
+                    {Math.round(q.aiEvaluation?.confidenceScore * 10 || 0)}% MATCH
                   </div>
-
-                  <div className="qa-metrics-grid">
-                    <div className="qa-metric">
-                      <label>Confidence</label>
-                      <div className="qa-value">{Math.round((q.aiEvaluation?.confidenceScore || 0) * 10)}%</div>
-                    </div>
-                    <div className="qa-metric">
-                      <label>Communication</label>
-                      <div className="qa-value">{Math.round((q.aiEvaluation?.communicationSkills || 0) * 10)}%</div>
-                    </div>
-                    <div className="qa-metric">
-                      <label>Technical</label>
-                      <div className="qa-value">{Math.round((q.aiEvaluation?.technicalAccuracy || 0) * 10)}%</div>
-                    </div>
-                  </div>
-
-                  {q.aiEvaluation?.feedback && (
-                    <div className="qa-feedback">
-                      <h4>AI Feedback:</h4>
-                      <p>{q.aiEvaluation.feedback}</p>
-                    </div>
-                  )}
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Suggestions Section (only if report exists) */}
-      {!isPending && report.suggestions && (
-        <div className="suggestions-section">
-          <h3>Career Growth Suggestions</h3>
-          <div className="suggestions-grid">
-            {report.suggestions.map((suggestion, index) => (
-              <div key={index} className="suggestion-card">
-                <div className="suggestion-number">{index + 1}</div>
-                <p>{suggestion}</p>
+                <p style={{ color: 'var(--color-text-muted)', fontStyle: 'italic', marginBottom: '2rem' }}>"{q.text}"</p>
+                <div className="qa-details" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                  <div className="transcription-box">
+                    <label style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--color-primary)', display: 'block', marginBottom: '0.5rem' }}>Your Response</label>
+                    <p style={{ fontSize: '0.95rem' }}>{q.transcription?.text || "Answer skipped or audio not processed."}</p>
+                  </div>
+                  <div className="feedback-box">
+                    <label style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--color-accent)', display: 'block', marginBottom: '0.5rem' }}>AI Insights</label>
+                    <p style={{ fontSize: '0.95rem' }}>{q.aiEvaluation?.feedback}</p>
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      )}
 
-      {/* Actions */}
-      <div className="action-buttons">
-        <button
-          className="btn-primary"
-          onClick={() => window.print()}
-          disabled={isPending}
-        >
-          Download Report
-        </button>
-        <button
-          className="btn-secondary"
-          onClick={() => window.location.href = '/'}
-        >
-          Back to Dashboard
-        </button>
-      </div>
+          <div className="action-buttons" style={{ marginTop: '4rem', display: 'flex', gap: '1.5rem', justifyContent: 'center' }}>
+            <button className="btn-start" style={{ padding: '1rem 3rem' }} onClick={() => window.print()}>
+              <FiDownload /> Download Full Report
+            </button>
+            <button className="btn-test" style={{ padding: '1rem 3rem' }} onClick={() => window.location.href = '/'}>
+              <FiHome /> Back to Dashboard
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 };

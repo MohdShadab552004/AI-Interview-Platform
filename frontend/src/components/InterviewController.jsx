@@ -40,7 +40,6 @@ const InterviewController = ({
         <button
           className="control-btn btn-skip"
           onClick={onSkipQuestion}
-          disabled={isRecording || isPlaying}
           title="Skip Question"
         >
           <FiSkipForward size={20} />

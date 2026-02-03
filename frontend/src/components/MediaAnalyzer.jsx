@@ -152,6 +152,13 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       }
 
       const analyser = audioContext.createAnalyser();
+
+      const audioTracks = stream.getAudioTracks();
+      if (audioTracks.length === 0) {
+        console.warn('MediaStream has no audio tracks for analysis');
+        return;
+      }
+
       const source = audioContext.createMediaStreamSource(stream);
 
       source.connect(analyser);
