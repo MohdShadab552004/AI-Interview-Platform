@@ -8,7 +8,7 @@ const env = require('../config/env');
 class AIService {
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY;
-    this.siteUrl = process.env.SITE_URL || 'http://localhost:3000';
+    this.siteUrl = process.env.SITE_URL || 'http://localhost:5173';
     this.siteTitle = 'Interview Platform';
 
     // Default models

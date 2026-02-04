@@ -4,6 +4,7 @@ import { FiMic, FiMicOff, FiSkipForward, FiPower, FiPlay, FiPause } from 'react-
 const InterviewController = ({
   isRecording,
   isPlaying,
+  hasAudioFinished,
   onStartRecording,
   onStopRecording,
   onSkipQuestion,
@@ -40,7 +41,7 @@ const InterviewController = ({
         <button
           className="control-btn btn-skip"
           onClick={onSkipQuestion}
-          disabled={isRecording || isPlaying}
+          disabled={!hasAudioFinished}
           title="Skip Question"
         >
           <FiSkipForward size={20} />
@@ -51,7 +52,7 @@ const InterviewController = ({
         <button
           className="control-btn btn-end"
           onClick={onEndInterview}
-          disabled={isRecording}
+          disabled={!hasAudioFinished}
           title="End Interview"
         >
           <FiPower size={20} />

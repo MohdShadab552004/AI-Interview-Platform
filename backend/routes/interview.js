@@ -14,17 +14,23 @@ const upload = multer({
 // Start new interview
 router.post('/start', upload.single('cv'), async (req, res) => {
   try {
-    const { candidateName, position, experienceLevel } = req.body;
+    const { candidateName, email, position, experienceLevel, company, jobId } = req.body;
+
+    console.log("start interview for", candidateName);
 
     const interview = await interviewService.createInterview({
       candidateName,
+      email,
       position: position || 'React Developer',
       experienceLevel: experienceLevel || 'Mid-level',
+      company,
+      interviewId: jobId, // Optional
       userId: req.session.userId || 'anonymous',
       cvBuffer: req.file ? req.file.buffer : null
     });
 
     req.session.interviewId = interview.id;
+    console.log("Interview session created:", interview.id);
     res.json({
       success: true,
       interview,
@@ -42,13 +48,14 @@ router.post('/start', upload.single('cv'), async (req, res) => {
 // Submit answer (audio + metrics)
 router.post('/submit-answer', upload.single('audio'), async (req, res) => {
   try {
-    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer } = req.body;
+    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer, skipped } = req.body;
     console.log('Interview ID:', interviewId);
     console.log('Question Index:', questionIndex);
+    console.log('Skipped:', skipped);
 
     const audioFile = req.file;
 
-    if (!audioFile && !textAnswer && !codeAnswer) {
+    if (!audioFile && !textAnswer && !codeAnswer && skipped !== 'true') {
       return res.status(400).json({
         success: false,
         error: 'No answer provided (audio, text, or code)'

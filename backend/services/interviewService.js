@@ -30,8 +30,8 @@ class InterviewService {
     this.interviews = new Map();
   }
 
-  async createInterview({ candidateName, position, experienceLevel, userId, cvBuffer }) {
-    const interviewId = uuidv4();
+  async createInterview({ candidateName, email, position, experienceLevel, company, userId, cvBuffer, interviewId: providedId }) {
+    const interviewId = providedId || uuidv4();
     const timestamp = Date.now();
 
     let questions = [];
@@ -68,8 +68,10 @@ class InterviewService {
     const interview = {
       id: interviewId,
       candidateName,
+      email,
       position,
       experienceLevel,
+      company,
       userId,
       status: 'active',
       startTime: timestamp,
@@ -132,7 +134,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -158,50 +160,66 @@ class InterviewService {
       audioPath = tempPath;
     }
 
-    // Store non-audio answers immediately
-    if (textAnswer) {
-      question.answer = textAnswer;
-      question.type = 'text';
-    } else if (codeAnswer) {
-      question.answer = codeAnswer;
-      question.type = 'code';
-    } else if (!audioBuffer) {
-      console.warn("No answer content provided");
-    }
-
-    // 2. Enqueue analysis job
-    const { analysisQueue, processJob } = require('../queues/analysisQueue');
-
-    if (isRedisConnected) {
-      await analysisQueue.add({
-        interviewId,
-        questionIndex,
-        audioPath,
-        audioMimeType,
-        videoMetrics,
-        textAnswer,
-        codeAnswer
-      }, {
-        attempts: 3,
-        backoff: 5000
-      });
-      console.log(`[Queue] Added analysis job for ${interviewId} Q${questionIndex}`);
+    // Mark as skipped if requested
+    if (skipped === 'true') {
+      question.answer = 'skipped';
+      question.transcription = { text: 'Question skipped by user' };
+      question.aiEvaluation = {
+        technicalAccuracy: 0,
+        communicationSkills: 0,
+        confidenceScore: 0,
+        overallScore: 0,
+        feedback: "Question was skipped."
+      };
+      question.answeredAt = Date.now();
     } else {
-      // Fallback: Process immediately (background async)
-      console.log(`[Queue] Redis not connected. Processing ${interviewId} Q${questionIndex} directly.`);
-      processJob({
-        interviewId,
-        questionIndex,
-        audioPath,
-        audioMimeType,
-        videoMetrics,
-        textAnswer,
-        codeAnswer
-      }).catch(err => console.error('Direct processing error:', err));
-    }
+      // Store non-audio answers immediately
+      if (textAnswer) {
+        question.answer = textAnswer;
+        question.type = 'text';
+      } else if (codeAnswer) {
+        question.answer = codeAnswer;
+        question.type = 'code';
+      } else if (!audioBuffer) {
+        console.warn("No answer content provided");
+      }
 
-    // 3. Mark as answering (placeholder until worker updates)
-    question.answer = 'processing'; // We don't store the full buffer in interview object anymore to save space
+      // 2. Enqueue analysis job
+      const { analysisQueue, processJob } = require('../queues/analysisQueue');
+
+      if (isRedisConnected && audioBuffer) {
+        await analysisQueue.add({
+          interviewId,
+          questionIndex,
+          audioPath,
+          audioMimeType,
+          videoMetrics,
+          textAnswer,
+          codeAnswer
+        }, {
+          attempts: 3,
+          backoff: 5000
+        });
+        console.log(`[Queue] Added analysis job for ${interviewId} Q${questionIndex}`);
+      } else if (audioBuffer) {
+        // Fallback: Process immediately (background async)
+        console.log(`[Queue] Redis not connected. Processing ${interviewId} Q${questionIndex} directly.`);
+        processJob({
+          interviewId,
+          questionIndex,
+          audioPath,
+          audioMimeType,
+          videoMetrics,
+          textAnswer,
+          codeAnswer
+        }).catch(err => console.error('Direct processing error:', err));
+      }
+
+      // 3. Mark as answering (placeholder until worker updates)
+      if (audioBuffer) {
+        question.answer = 'processing';
+      }
+    }
 
     // Update interview progress
     interview.currentQuestion = questionIndex + 1;
@@ -257,14 +275,28 @@ class InterviewService {
     }
 
     if (interview.status !== 'completed') {
+      // Mark all remaining questions as skipped
+      interview.questions.forEach((q, idx) => {
+        if (!q.answer) {
+          q.answer = 'skipped';
+          q.transcription = { text: 'Question skipped (interview ended early)' };
+          q.aiEvaluation = {
+            technicalAccuracy: 0,
+            communicationSkills: 0,
+            confidenceScore: 0,
+            overallScore: 0,
+            feedback: "Question was not attempted."
+          };
+          q.answeredAt = Date.now();
+          interview.metrics.completedQuestions++;
+        }
+      });
+
       interview.status = 'completed';
       interview.endTime = Date.now();
 
-      // Only generate if all questions are answered (background worker might be doing this too)
-      const allAnswered = interview.questions.every(q => q.transcription);
-      if (allAnswered && !interview.finalEvaluation) {
-        interview.finalEvaluation = await this.generateFinalEvaluation(interview);
-      }
+      // Generate final evaluation
+      interview.finalEvaluation = await this.generateFinalEvaluation(interview);
 
       await this.saveInterview(interview);
     }

@@ -22,6 +22,7 @@ const InterviewPage = () => {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const interviewRef = useRef(null); // Add ref to track interview
+  const activeAudioRef = useRef(null); // Ref to track current playing audio
 
   // State
   const [interview, setInterview] = useState(null);
@@ -33,6 +34,8 @@ const InterviewPage = () => {
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
+  const [hasAudioFinished, setHasAudioFinished] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // API base URL
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
@@ -116,7 +119,7 @@ const InterviewPage = () => {
 
         setCurrentQuestion(currentQ);
 
-        if (currentQ) {
+        if (currentQ && isSetupComplete) {
           console.log("Playing question text:", currentQ.text);
           playQuestion(currentQ.text, currentQ.audio);
         }
@@ -139,6 +142,7 @@ const InterviewPage = () => {
       }
 
       setIsPlaying(true);
+      setHasAudioFinished(false);
       let audioBlob;
 
       if (audioBase64) {
@@ -169,12 +173,14 @@ const InterviewPage = () => {
 
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
+      activeAudioRef.current = audio;
 
       audio.oncanplaythrough = () => {
         console.log("Audio loaded, starting playback");
         audio.play().catch(e => {
           console.error("Playback failed start:", e);
           setIsPlaying(false);
+          setHasAudioFinished(true);
           startRecording();
         });
       };
@@ -182,6 +188,7 @@ const InterviewPage = () => {
       audio.onended = () => {
         console.log("Audio playback ended");
         setIsPlaying(false);
+        setHasAudioFinished(true);
         URL.revokeObjectURL(audioUrl);
 
         // Small delay before starting recording
@@ -193,6 +200,7 @@ const InterviewPage = () => {
       audio.onerror = (err) => {
         console.error("Audio playback error event:", audio.error);
         setIsPlaying(false);
+        setHasAudioFinished(true); // Allow them to move on if audio fails
         URL.revokeObjectURL(audioUrl);
         startRecording();
       };
@@ -200,6 +208,7 @@ const InterviewPage = () => {
     } catch (error) {
       console.error("playQuestion error:", error);
       setIsPlaying(false);
+      setHasAudioFinished(true);
       startRecording();
     }
   };
@@ -279,6 +288,8 @@ const InterviewPage = () => {
     }
 
     try {
+      if (isSubmitting) return;
+      setIsSubmitting(true);
       toast.loading("Processing answer...");
       console.log("Submitting answer API call to:", `${API_BASE}/interview/submit-answer`);
 
@@ -317,6 +328,7 @@ const InterviewPage = () => {
           });
 
           setCurrentQuestion(response.data.nextQuestion);
+          setHasAudioFinished(false);
 
           setTimeout(() => {
             playQuestion(response.data.nextQuestion.text, response.data.nextQuestion.audio);
@@ -334,6 +346,7 @@ const InterviewPage = () => {
         console.error("Response error:", error.response.data);
       }
     } finally {
+      setIsSubmitting(false);
       // Clear audio chunks for next recording
       audioChunksRef.current = [];
     }
@@ -483,6 +496,14 @@ const InterviewPage = () => {
   const skipQuestion = async () => {
     console.log("skipQuestion called");
 
+    if (isSubmitting) return;
+
+    // Stop current audio if playing
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current = null;
+    }
+
     if (!window.confirm("Skip this question?")) return;
 
     // Check if interview exists
@@ -495,6 +516,9 @@ const InterviewPage = () => {
     console.log("Skipping question index:", interview.currentQuestion);
 
     try {
+      setIsSubmitting(true);
+      toast.loading("Skipping question...", { id: 'skip-toast' });
+
       const formData = new FormData();
       formData.append("interviewId", sessionId);
       formData.append("questionIndex", interview.currentQuestion);
@@ -507,27 +531,39 @@ const InterviewPage = () => {
 
       console.log("Skip response:", response.data);
 
-      if (response.data.success && response.data.nextQuestion) {
-        setCurrentQuestion(response.data.nextQuestion);
-        setInterview((prev) => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            currentQuestion: prev.currentQuestion + 1,
-            metrics: {
-              ...prev.metrics,
-              completedQuestions: prev.metrics.completedQuestions + 1,
-            },
-          };
-        });
+      if (response.data.success) {
+        toast.success("Question skipped", { id: 'skip-toast' });
+        if (response.data.isComplete) {
+          navigate(`/results/${sessionId}`);
+          return;
+        }
 
-        setTimeout(() => {
-          playQuestion(response.data.nextQuestion.text);
-        }, 1000);
+        const nextQ = response.data.nextQuestion;
+        if (nextQ) {
+          setCurrentQuestion(nextQ);
+          setHasAudioFinished(false);
+          setInterview((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              currentQuestion: prev.currentQuestion + 1,
+              metrics: {
+                ...prev.metrics,
+                completedQuestions: prev.metrics.completedQuestions + 1,
+              },
+            };
+          });
+
+          setTimeout(() => {
+            playQuestion(nextQ.text, nextQ.audio);
+          }, 1000);
+        }
       }
     } catch (error) {
       console.error("skipQuestion error:", error);
-      toast.error("Failed to skip question");
+      toast.error("Failed to skip question", { id: 'skip-toast' });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -538,6 +574,13 @@ const InterviewPage = () => {
     if (!window.confirm("End interview early? Your progress will be saved.")) return;
 
     try {
+      // Stop current audio if playing
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
+      }
+      window.speechSynthesis?.cancel(); // If using browser TTS
+
       await axios.post(`${API_BASE}/interview/end/${sessionId}`);
       console.log("Interview ended");
       navigate(`/results/${sessionId}`);
@@ -674,7 +717,12 @@ const InterviewPage = () => {
 
               <button
                 disabled={!isCalibrated}
-                onClick={() => setIsSetupComplete(true)}
+                onClick={() => {
+                  setIsSetupComplete(true);
+                  if (currentQuestion) {
+                    playQuestion(currentQuestion.text, currentQuestion.audio);
+                  }
+                }}
                 style={{
                   padding: '16px',
                   fontSize: '18px',
@@ -828,11 +876,12 @@ const InterviewPage = () => {
           <InterviewController
             isRecording={isRecording}
             isPlaying={isPlaying}
+            hasAudioFinished={hasAudioFinished}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
             onSkipQuestion={skipQuestion}
             onEndInterview={endInterview}
-            disabled={!currentQuestion}
+            disabled={!currentQuestion || isSubmitting}
           />
 
           {/* Progress */}
