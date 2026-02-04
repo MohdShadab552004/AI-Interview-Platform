@@ -6,6 +6,7 @@ import axios from 'axios';
 import { CountdownCircleTimer } from 'react-countdown-circle-timer';
 import InterviewController from '../components/InterviewController';
 import MediaAnalyzer from '../components/MediaAnalyzer';
+import CheatingDetectionManager from '../components/CheatingDetector/CheatingDetectionManager';
 import Editor from 'react-simple-code-editor';
 import { highlight, languages } from 'prismjs/components/prism-core';
 import 'prismjs/components/prism-clike';
@@ -58,9 +59,9 @@ const InterviewPage = () => {
       if (webcamRef.current && webcamRef.current.srcObject) {
         webcamRef.current.srcObject.getTracks().forEach(track => track.stop());
       }
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
       }
     };
   }, [sessionId]);
@@ -90,8 +91,8 @@ const InterviewPage = () => {
         setIsRecording(false);
       }
 
-      if (audioRef.current) {
-        audioRef.current.pause();
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
       }
 
       setIsPlaying(true);
@@ -126,7 +127,7 @@ const InterviewPage = () => {
         setIsPlaying(false);
         setHasAudioFinished(true);
         URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
+        activeAudioRef.current = null;
         setTimeout(startRecording, 500);
       };
 
@@ -134,7 +135,7 @@ const InterviewPage = () => {
         setIsPlaying(false);
         setHasAudioFinished(true); // Allow them to move on if audio fails
         URL.revokeObjectURL(audioUrl);
-        audioRef.current = null;
+        activeAudioRef.current = null;
         startRecording();
       };
     } catch (error) {
@@ -276,9 +277,9 @@ const InterviewPage = () => {
     }
     if (!window.confirm("Skip this question?")) return;
 
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
+    if (activeAudioRef.current) {
+      activeAudioRef.current.pause();
+      activeAudioRef.current = null;
       setIsPlaying(false);
     }
 
@@ -341,18 +342,43 @@ const InterviewPage = () => {
 
   const endInterview = async () => {
     if (!window.confirm("End interview early?")) return;
+
     try {
-      // Stop current audio if playing
+      // 1. Stop current audio if playing
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
       }
-      window.speechSynthesis?.cancel(); // If using browser TTS
+      setIsPlaying(false);
+      window.speechSynthesis?.cancel();
 
+      // 2. Stop recording if active
+      if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+      }
+
+      // 3. Stop webcam and microphone
+      if (webcamRef.current && webcamRef.current.video && webcamRef.current.video.srcObject) {
+        webcamRef.current.video.srcObject.getTracks().forEach(track => {
+          track.stop();
+        });
+      }
+
+      // 4. Clear loading/submitting states
+      setIsSubmitting(false);
+      setHasAudioFinished(false);
+
+      // 5. Call backend to end interview
+      toast.loading("Ending interview...", { id: 'end-interview' });
       await axios.post(`${API_BASE}/interview/end/${sessionId}`);
+      toast.success("Interview ended", { id: 'end-interview' });
+
+      // 6. Navigate to results
       navigate(`/results/${sessionId}`);
     } catch (error) {
-      toast.error("Failed to end interview");
+      console.error("Error ending interview:", error);
+      toast.error("Failed to end interview", { id: 'end-interview' });
     }
   };
 
@@ -410,6 +436,14 @@ const InterviewPage = () => {
                 className={`btn-start-session ${isCalibrated ? 'ready' : ''}`}
                 disabled={!isCalibrated}
                 onClick={() => {
+                  // Request fullscreen
+                  if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(err => {
+                      console.warn("Fullscreen request failed:", err);
+                      toast.error("Please enable fullscreen manually (F11)");
+                    });
+                  }
+
                   setIsSetupComplete(true);
                   if (currentQuestion) {
                     playQuestion(currentQuestion.text, currentQuestion.audio);
@@ -435,6 +469,13 @@ const InterviewPage = () => {
         </div>
       ) : (
         <div className="interview-container">
+          <CheatingDetectionManager
+            interviewId={sessionId}
+            isActive={!isSetupMode}
+            videoMetrics={videoMetrics}
+            audioLevel={audioLevel}
+            webcamRef={webcamRef}
+          />
           <div className="video-column">
             <div className="video-container">
               <Webcam

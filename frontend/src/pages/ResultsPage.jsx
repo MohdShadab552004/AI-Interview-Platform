@@ -16,6 +16,7 @@ import {
   ArcElement
 } from 'chart.js';
 import toast from 'react-hot-toast';
+import ViolationMetrics from '../components/ViolationMetrics';
 import { FiDownload, FiHome, FiAward, FiCheckCircle, FiXCircle, FiTrendingUp } from 'react-icons/fi';
 
 ChartJS.register(
@@ -180,6 +181,12 @@ const ResultsPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Cheating Detection Report */}
+          <ViolationMetrics
+            violations={interview.cheatLogs || []}
+            riskScore={interview.riskScore || 0}
+          />
 
           <div className="detailed-analysis">
             <h2 style={{ marginBottom: '2rem' }}>Section Breakdown</h2>

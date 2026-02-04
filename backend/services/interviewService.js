@@ -84,7 +84,9 @@ class InterviewService {
         attentionScore: 0,
         speechClarity: 0
       },
-      finalEvaluation: null
+      finalEvaluation: null,
+      cheatLogs: [],
+      riskScore: 0
     };
 
     // Store in Redis with 24h expiry if connected, otherwise in memory
@@ -275,11 +277,11 @@ class InterviewService {
     }
 
     if (interview.status !== 'completed') {
-      // Mark all remaining questions as skipped
+      // Mark all remaining questions as not attempted
       interview.questions.forEach((q, idx) => {
         if (!q.answer) {
-          q.answer = 'skipped';
-          q.transcription = { text: 'Question skipped (interview ended early)' };
+          q.answer = 'not attempted';
+          q.transcription = { text: 'Question not attempted (interview ended early)' };
           q.aiEvaluation = {
             technicalAccuracy: 0,
             communicationSkills: 0,
@@ -302,6 +304,23 @@ class InterviewService {
     }
 
     return interview.finalEvaluation;
+  }
+  async logCheatAttempt(interviewId, violation) {
+    const interview = await this.getInterview(interviewId);
+    if (!interview) return null;
+
+    if (!interview.cheatLogs) interview.cheatLogs = [];
+    if (!interview.riskScore) interview.riskScore = 0;
+
+    interview.cheatLogs.push(violation);
+
+    // Update Risk Score
+    const severityScores = { 'critical': 20, 'high': 10, 'medium': 5, 'low': 2 };
+    const score = severityScores[violation.severity] || 2;
+    interview.riskScore += score;
+
+    await this.saveInterview(interview);
+    return { success: true, riskScore: interview.riskScore };
   }
 }
 

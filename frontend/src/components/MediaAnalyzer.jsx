@@ -39,7 +39,7 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
     });
 
     faceMesh.setOptions({
-      maxNumFaces: 1,
+      maxNumFaces: 2,
       refineLandmarks: true,
       minDetectionConfidence: 0.5,
       minTrackingConfidence: 0.5
@@ -202,7 +202,8 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
         attention: 0,
         eyeContact: 0,
         confidence: 0,
-        faceDetected: false
+        faceDetected: false,
+        faceCount: 0
       }));
       return;
     }
@@ -352,6 +353,7 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       confidence: confidenceScore,
       stress: stressScore,
       faceDetected: true,
+      faceCount: results.multiFaceLandmarks.length,
       gazePattern: gazePattern,
       detectedObjects: detectedObjects,
       networkQuality: networkQuality

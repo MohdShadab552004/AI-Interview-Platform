@@ -54,7 +54,6 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
     console.log('Skipped:', skipped);
 
     const audioFile = req.file;
-    const { skipped } = req.body;
 
     if (!audioFile && !textAnswer && !codeAnswer && skipped !== 'true') {
       return res.status(400).json({
@@ -128,6 +127,28 @@ router.post('/end/:interviewId', async (req, res) => {
       success: false,
       error: 'Failed to end interview'
     });
+  }
+});
+
+// Log cheat attempt
+router.post('/:id/cheat-log', async (req, res) => {
+  try {
+    const { type, details, severity, detectedAt } = req.body;
+    const result = await interviewService.logCheatAttempt(req.params.id, {
+      type,
+      details,
+      severity,
+      detectedAt: detectedAt || new Date().toISOString()
+    });
+
+    if (!result) {
+      return res.status(404).json({ success: false, error: 'Interview not found' });
+    }
+
+    res.json({ success: true, riskScore: result.riskScore });
+  } catch (error) {
+    console.error('Error logging cheat attempt:', error);
+    res.status(500).json({ success: false, error: 'Failed to log cheat attempt' });
   }
 });
 
