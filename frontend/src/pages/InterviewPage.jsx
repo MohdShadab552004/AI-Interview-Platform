@@ -72,15 +72,11 @@ const InterviewPage = () => {
         setInterview(response.data.interview);
         const currentQ = response.data.interview.questions[response.data.interview.currentQuestion];
         setCurrentQuestion(currentQ);
-<<<<<<< HEAD
 
         if (currentQ && isSetupComplete) {
           console.log("Playing question text:", currentQ.text);
           playQuestion(currentQ.text, currentQ.audio);
         }
-=======
-        if (currentQ) playQuestion(currentQ.text, currentQ.audio);
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
       }
     } catch (error) {
       toast.error("Failed to load interview session");
@@ -116,11 +112,7 @@ const InterviewPage = () => {
 
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
-<<<<<<< HEAD
       activeAudioRef.current = audio;
-=======
-      audioRef.current = audio;
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
 
       audio.oncanplaythrough = () => {
         audio.play().catch(() => {
@@ -186,7 +178,6 @@ const InterviewPage = () => {
     }
 
     try {
-<<<<<<< HEAD
       if (isSubmitting) return;
       setIsSubmitting(true);
       toast.loading("Processing answer...");
@@ -202,13 +193,6 @@ const InterviewPage = () => {
           timeout: 30000
         }
       );
-=======
-      toast.loading("Processing your response...");
-      const response = await axios.post(`${API_BASE}/interview/submit-answer`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 30000
-      });
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
 
       toast.dismiss();
       if (response.data.success) {
@@ -221,26 +205,19 @@ const InterviewPage = () => {
             metrics: { ...prev.metrics, completedQuestions: prev.metrics.completedQuestions + 1 }
           }));
           setCurrentQuestion(response.data.nextQuestion);
-<<<<<<< HEAD
           setHasAudioFinished(false);
 
           setTimeout(() => {
             playQuestion(response.data.nextQuestion.text, response.data.nextQuestion.audio);
           }, 1000);
-=======
-          setTimeout(() => playQuestion(response.data.nextQuestion.text, response.data.nextQuestion.audio), 1000);
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
         }
       }
     } catch (error) {
       toast.dismiss();
       toast.error("Failed to submit response");
     } finally {
-<<<<<<< HEAD
       setIsSubmitting(false);
       // Clear audio chunks for next recording
-=======
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
       audioChunksRef.current = [];
     }
   };
@@ -288,7 +265,6 @@ const InterviewPage = () => {
   };
 
   const skipQuestion = async () => {
-<<<<<<< HEAD
     console.log("skipQuestion called");
 
     if (isSubmitting) return;
@@ -298,9 +274,6 @@ const InterviewPage = () => {
       activeAudioRef.current.pause();
       activeAudioRef.current = null;
     }
-
-=======
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
     if (!window.confirm("Skip this question?")) return;
 
     if (audioRef.current) {
@@ -315,7 +288,6 @@ const InterviewPage = () => {
     }
 
     try {
-<<<<<<< HEAD
       setIsSubmitting(true);
       toast.loading("Skipping question...", { id: 'skip-toast' });
 
@@ -364,28 +336,6 @@ const InterviewPage = () => {
       toast.error("Failed to skip question", { id: 'skip-toast' });
     } finally {
       setIsSubmitting(false);
-=======
-      const response = await axios.post(`${API_BASE}/interview/submit-answer`, {
-        interviewId: sessionId,
-        questionIndex: interview.currentQuestion,
-        skipped: "true"
-      });
-      if (response.data.success) {
-        if (response.data.isComplete) {
-          navigate(`/results/${sessionId}`);
-        } else {
-          setCurrentQuestion(response.data.nextQuestion);
-          setInterview(prev => ({
-            ...prev,
-            currentQuestion: prev.currentQuestion + 1,
-            metrics: { ...prev.metrics, completedQuestions: prev.metrics.completedQuestions + 1 }
-          }));
-          setTimeout(() => playQuestion(response.data.nextQuestion.text, response.data.nextQuestion.audio), 1000);
-        }
-      }
-    } catch (error) {
-      toast.error("Failed to skip question");
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
     }
   };
 
@@ -459,7 +409,6 @@ const InterviewPage = () => {
               <button
                 className={`btn-start-session ${isCalibrated ? 'ready' : ''}`}
                 disabled={!isCalibrated}
-<<<<<<< HEAD
                 onClick={() => {
                   setIsSetupComplete(true);
                   if (currentQuestion) {
@@ -478,9 +427,6 @@ const InterviewPage = () => {
                   opacity: isCalibrated ? 1 : 0.7,
                   transition: 'all 0.3s'
                 }}
-=======
-                onClick={() => setIsSetupComplete(true)}
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
               >
                 {isCalibrated ? <><FiCheck /> Begin Interview</> : "Calibrating AI..."}
               </button>
@@ -555,19 +501,6 @@ const InterviewPage = () => {
               </div>
               <p className="question-text">{currentQuestion?.text}</p>
 
-<<<<<<< HEAD
-  {/* Controls */ }
-  <InterviewController
-    isRecording={isRecording}
-    isPlaying={isPlaying}
-    hasAudioFinished={hasAudioFinished}
-    onStartRecording={startRecording}
-    onStopRecording={stopRecording}
-    onSkipQuestion={skipQuestion}
-    onEndInterview={endInterview}
-    disabled={!currentQuestion || isSubmitting}
-  />
-=======
               {isRecording && (
                 <div className="recording-indicator">
                   <CountdownCircleTimer
@@ -585,45 +518,49 @@ const InterviewPage = () => {
                   <p className="rec-status">Recording Active</p>
                 </div>
               )}
->>>>>>> 8c424e4f4c48500c7b4d1699c9f99aa41527c9d6
 
-  { isPlaying && <div className="playing-pulse"><div className="pulse-dot"></div> Listening...</div> }
+              {/* Controls */}
+              <InterviewController
+                isRecording={isRecording}
+                isPlaying={isPlaying}
+                hasAudioFinished={hasAudioFinished}
+                onStartRecording={startRecording}
+                onStopRecording={stopRecording}
+                onSkipQuestion={skipQuestion}
+                onEndInterview={endInterview}
+                onPlayQuestion={() => playQuestion(currentQuestion?.text, currentQuestion?.audio)}
+                disabled={!currentQuestion || isSubmitting}
+              />
 
-  {
-    !isPlaying && !isRecording && currentQuestion?.type !== 'code' && (
-      <textarea
-        placeholder="Optional: Type your thoughts or notes here..."
-        className="answer-textarea"
-        onChange={(e) => window.textAnswer = e.target.value}
-      />
-    )
-  }
+              {isPlaying && <div className="playing-pulse"><div className="pulse-dot"></div> Listening...</div>}
 
-  {
-    currentQuestion?.type === 'code' && !isRecording && !isPlaying && (
-      <div className="code-editor-box">
-        <div className="editor-tab">Code Editor ({currentQuestion.language || 'JS'})</div>
-        <Editor
-          value={window.codeAnswer || ''}
-          onValueChange={code => window.codeAnswer = code}
-          highlight={code => highlight(code, languages.javascript)}
-          padding={20}
-          className="prism-editor"
-        />
-      </div>
-    )
-  }
+              {
+                !isPlaying && !isRecording && currentQuestion?.type !== 'code' && (
+                  <textarea
+                    placeholder="Optional: Type your thoughts or notes here..."
+                    className="answer-textarea"
+                    onChange={(e) => window.textAnswer = e.target.value}
+                  />
+                )
+              }
+
+              {
+                currentQuestion?.type === 'code' && !isRecording && !isPlaying && (
+                  <div className="code-editor-box">
+                    <div className="editor-tab">Code Editor ({currentQuestion.language || 'JS'})</div>
+                    <Editor
+                      value={window.codeAnswer || ''}
+                      onValueChange={code => window.codeAnswer = code}
+                      highlight={code => highlight(code, languages.javascript)}
+                      padding={20}
+                      className="prism-editor"
+                    />
+                  </div>
+                )
+              }
             </div >
 
-  <InterviewController
-    isRecording={isRecording}
-    isPlaying={isPlaying}
-    onStartRecording={startRecording}
-    onStopRecording={stopRecording}
-    onSkipQuestion={skipQuestion}
-    onEndInterview={endInterview}
-    onPlayQuestion={() => playQuestion(currentQuestion?.text, currentQuestion?.audio)}
-  />
+
           </div >
         </div >
       )}

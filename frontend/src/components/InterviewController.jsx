@@ -10,7 +10,8 @@ const InterviewController = ({
   onSkipQuestion,
   onEndInterview,
   onPlayQuestion,
-  onPauseQuestion
+  onPauseQuestion,
+  disabled
 }) => {
   return (
     <div className="interview-controller">
@@ -19,7 +20,7 @@ const InterviewController = ({
         <button
           className={`control-btn ${isPlaying ? 'btn-playing' : 'btn-play'}`}
           onClick={isPlaying ? onPauseQuestion : onPlayQuestion}
-          disabled={!onPlayQuestion}
+          disabled={disabled || !onPlayQuestion}
           title={isPlaying ? "Pause Question" : "Play Question"}
         >
           {isPlaying ? <FiPause size={20} /> : <FiPlay size={20} />}
@@ -30,7 +31,7 @@ const InterviewController = ({
         <button
           className={`control-btn ${isRecording ? 'btn-stop' : 'btn-record'}`}
           onClick={isRecording ? onStopRecording : onStartRecording}
-          disabled={isPlaying}
+          disabled={disabled || isPlaying}
           title={isRecording ? "Stop Recording" : "Start Recording"}
         >
           {isRecording ? <FiMicOff size={20} /> : <FiMic size={20} />}
@@ -41,7 +42,7 @@ const InterviewController = ({
         <button
           className="control-btn btn-skip"
           onClick={onSkipQuestion}
-          disabled={!hasAudioFinished}
+          disabled={disabled || !hasAudioFinished}
         >
           <FiSkipForward size={20} />
           <span>Skip</span>
@@ -51,7 +52,7 @@ const InterviewController = ({
         <button
           className="control-btn btn-end"
           onClick={onEndInterview}
-          disabled={!hasAudioFinished}
+          disabled={disabled || !hasAudioFinished}
           title="End Interview"
         >
           <FiPower size={20} />
