@@ -2,6 +2,20 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import toast from 'react-hot-toast';
+import {
+  FiVideo,
+  FiMic,
+  FiUpload,
+  FiPlay,
+  FiBriefcase,
+  FiCpu,
+  FiBarChart,
+  FiShield,
+  FiTarget,
+  FiUsers,
+  FiClock,
+  FiCheckCircle
+} from 'react-icons/fi';
 import '../styles/HomePage.css';
 
 const HomePage = () => {
@@ -15,12 +29,6 @@ const HomePage = () => {
     company: '',
     jobId: '',
   });
-
-  // Available positions
-  const positions = [];
-
-  // Experience levels
-  const experienceLevels = [];
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
@@ -46,10 +54,9 @@ const HomePage = () => {
     if (!validateForm()) return;
 
     setLoading(true);
+    const toastId = toast.loading('Preparing your interview session...');
 
     try {
-      toast.loading('Preparing your interview...');
-
       const formPayload = new FormData();
       formPayload.append('candidateName', formData.candidateName);
       formPayload.append('email', formData.email);
@@ -68,12 +75,9 @@ const HomePage = () => {
         }
       });
 
-      toast.dismiss();
-
       if (response.data.success) {
-        toast.success('Interview session created!');
+        toast.success('Interview session created!', { id: toastId });
 
-        // Save to localStorage
         localStorage.setItem('currentInterview', JSON.stringify({
           sessionId: response.data.interview.id,
           candidateName: formData.candidateName,
@@ -83,12 +87,11 @@ const HomePage = () => {
 
         navigate(`/interview/${response.data.sessionId}`);
       } else {
-        toast.error(response.data.error || 'Failed to start interview');
+        toast.error(response.data.error || 'Failed to start interview', { id: toastId });
       }
     } catch (error) {
-      toast.dismiss();
       console.error('Error starting interview:', error);
-      toast.error(error.response?.data?.error || 'Network error. Please try again.');
+      toast.error(error.response?.data?.error || 'Network error. Please try again.', { id: toastId });
     } finally {
       setLoading(false);
     }
@@ -99,7 +102,7 @@ const HomePage = () => {
     if (file) {
       if (file.type === "application/pdf") {
         setFormData(prev => ({ ...prev, cvFile: file }));
-        toast.success("CV Uploaded");
+        toast.success("CV Uploaded Successfully");
       } else {
         toast.error("Please upload a PDF file");
       }
@@ -112,14 +115,11 @@ const HomePage = () => {
         video: true,
         audio: true
       });
-
-      // Stop all tracks
       stream.getTracks().forEach(track => track.stop());
-
-      toast.success('Camera and microphone are working!');
+      toast.success('Camera and microphone are ready!');
       return true;
     } catch (error) {
-      toast.error('Please allow camera and microphone access');
+      toast.error('Camera/Mic access denied. Please allow permissions.');
       return false;
     }
   };
@@ -129,39 +129,38 @@ const HomePage = () => {
       {/* Hero Section */}
       <header className="hero-section">
         <div className="hero-content">
+          <div className="badge">✨ Next Generation Interviewing</div>
           <h1 className="hero-title">
             AI-Powered <span className="highlight">Technical Interviews</span>
           </h1>
           <p className="hero-subtitle">
-            Experience the future of hiring. Get evaluated by our AI interview system
-            with real-time feedback and comprehensive analysis.
+            Experience the future of hiring. Get evaluated by our advanced AI system
+            with real-time behavioral analysis and technical depth.
           </p>
           <div className="hero-stats">
             <div className="stat">
-              <h3>10,000+</h3>
-              <p>Interviews Conducted</p>
+              <h3>10k+</h3>
+              <p>Interviews</p>
             </div>
             <div className="stat">
               <h3>98%</h3>
-              <p>Accuracy Rate</p>
+              <p>Accuracy</p>
             </div>
             <div className="stat">
               <h3>24/7</h3>
               <p>Available</p>
             </div>
-            <div className="stat">
-              <h3>50+</h3>
-              <p>Companies</p>
-            </div>
           </div>
         </div>
         <div className="hero-visual">
           <div className="interview-preview">
-            <div className="preview-screen"></div>
+            <div className="preview-screen">
+              {/* Simulating scanning line and AI indicators via CSS */}
+            </div>
             <div className="preview-metrics">
-              <span className="metric active">🎯 Attention</span>
-              <span className="metric">🎤 Voice</span>
-              <span className="metric">📊 Analysis</span>
+              <span className="metric active"><FiTarget /> Focus</span>
+              <span className="metric"><FiMic /> Audio</span>
+              <span className="metric"><FiBarChart /> Sentiment</span>
             </div>
           </div>
         </div>
@@ -169,46 +168,41 @@ const HomePage = () => {
 
       {/* Main Content */}
       <main className="main-content">
-        {/* Interview Setup Form */}
-        <section className="setup-section">
+        {/* Setup Section */}
+        <section className="setup-section" id="start">
           <div className="section-header">
-            <h2>Start Your Interview</h2>
-            <p>Fill in your details to begin the AI-powered interview</p>
+            <h2>Ready to Begin?</h2>
+            <p>Fill in your details to start your AI evaluation session</p>
           </div>
 
           <form onSubmit={startInterview} className="interview-form">
             <div className="form-group">
-              <label htmlFor="cv">
-                Upload CV (PDF) *
-              </label>
+              <label>Resume / CV (Required)</label>
               <div className="file-upload-wrapper">
+                <FiUpload size={32} style={{ marginBottom: '1rem', color: 'var(--color-primary)' }} />
+                <p>{formData.cvFile ? <span className="file-name"><FiCheckCircle /> {formData.cvFile.name}</span> : 'Click or drop PDF here'}</p>
                 <input
                   type="file"
-                  id="cv"
                   accept=".pdf"
                   onChange={handleFileChange}
                   disabled={loading}
                   className="file-input"
                 />
-                {formData.cvFile && <span className="file-name">✅ {formData.cvFile.name}</span>}
               </div>
             </div>
 
             <div className="form-group">
-              <label htmlFor="jobId">
-                Interview ID (Optional)
-              </label>
+              <label htmlFor="jobId">Interview ID / Job Code (Optional)</label>
               <input
                 type="text"
                 id="jobId"
                 name="jobId"
                 value={formData.jobId}
                 onChange={handleInputChange}
-                placeholder="Enter Interview ID"
+                placeholder="e.g. JB-10293"
                 disabled={loading}
               />
             </div>
-
 
             <div className="form-actions">
               <button
@@ -217,21 +211,14 @@ const HomePage = () => {
                 onClick={checkCameraMic}
                 disabled={loading}
               >
-                Test Camera & Mic
+                <FiVideo /> Test Setup
               </button>
               <button
                 type="submit"
                 className="btn-start"
                 disabled={loading}
               >
-                {loading ? (
-                  <>
-                    <span className="spinner"></span>
-                    Starting Interview...
-                  </>
-                ) : (
-                  'Start Interview Now'
-                )}
+                {loading ? <span className="spinner"></span> : <><FiPlay /> Start Interview</>}
               </button>
             </div>
           </form>
@@ -240,74 +227,71 @@ const HomePage = () => {
         {/* Features Section */}
         <section className="features-section">
           <div className="section-header">
-            <h2>How It Works</h2>
-            <p>Experience a seamless interview process powered by AI</p>
+            <h2>Why Choose AI Interview?</h2>
+            <p>Our platform combines deep learning with behavioral science</p>
           </div>
 
           <div className="features-grid">
             <div className="feature-card">
-              <div className="feature-icon">🎯</div>
+              <div className="feature-icon"><FiCpu /></div>
               <h3>Smart Questions</h3>
-              <p>AI-generated questions tailored to your position and experience level</p>
+              <p>Adaptive technical questions that adjust based on your real-time responses.</p>
             </div>
 
             <div className="feature-card">
-              <div className="feature-icon">🎤</div>
+              <div className="feature-icon"><FiMic /></div>
               <h3>Voice Analysis</h3>
-              <p>Real-time analysis of speech patterns, confidence, and clarity</p>
+              <p>Detailed analysis of tone, confidence, and keyword relevance in your speech.</p>
             </div>
 
             <div className="feature-card">
-              <div className="feature-icon">👁️</div>
-              <h3>Video Proctoring</h3>
-              <p>Attention tracking and eye contact monitoring for comprehensive evaluation</p>
+              <div className="feature-icon"><FiVideo /></div>
+              <h3>Proctoring</h3>
+              <p>Advanced gaze tracking and focus monitoring to ensure interview integrity.</p>
             </div>
 
             <div className="feature-card">
-              <div className="feature-icon">📊</div>
-              <h3>Instant Feedback</h3>
-              <p>Detailed evaluation report immediately after the interview</p>
+              <div className="feature-icon"><FiBarChart /></div>
+              <h3>Instant Insights</h3>
+              <p>Get a comprehensive PDF report with your scores immediately after completion.</p>
             </div>
           </div>
         </section>
 
-        {/* Requirements Section */}
+        {/* Requirements */}
         <section className="requirements-section">
           <div className="section-header">
-            <h2>Requirements</h2>
-            <p>Ensure you have everything ready before starting</p>
+            <h2>Technical Requirements</h2>
+            <p>Ensure a smooth experience by checking these requirements</p>
           </div>
 
           <div className="requirements-list">
             <div className="requirement">
-              <div className="req-icon">💻</div>
+              <div className="req-icon"><FiVideo /></div>
               <div className="req-content">
-                <h3>Computer with Webcam</h3>
-                <p>A laptop or desktop with a functional webcam</p>
+                <h3>Stable Camera</h3>
+                <p>Functional webcam with clear visibility.</p>
               </div>
             </div>
-
             <div className="requirement">
-              <div className="req-icon">🎤</div>
+              <div className="req-icon"><FiMic /></div>
               <div className="req-content">
                 <h3>Microphone</h3>
-                <p>Built-in or external microphone for clear audio</p>
+                <p>Clear audio input for voice evaluation.</p>
               </div>
             </div>
-
             <div className="requirement">
-              <div className="req-icon">🌐</div>
+              <div className="req-icon"><FiClock /></div>
               <div className="req-content">
-                <h3>Stable Internet</h3>
-                <p>Minimum 5 Mbps upload/download speed</p>
+                <h3>30-45 Minutes</h3>
+                <p>Uninterrupted time for the session.</p>
               </div>
             </div>
-
             <div className="requirement">
-              <div className="req-icon">🔒</div>
+              <div className="req-icon"><FiShield /></div>
               <div className="req-content">
-                <h3>Quiet Environment</h3>
-                <p>Noise-free room with good lighting</p>
+                <h3>Privacy</h3>
+                <p>Quiet room with good lighting conditions.</p>
               </div>
             </div>
           </div>
@@ -316,34 +300,28 @@ const HomePage = () => {
         {/* Testimonials */}
         <section className="testimonials-section">
           <div className="section-header">
-            <h2>What Candidates Say</h2>
-            <p>Hear from those who've experienced our AI interview system</p>
+            <h2>Success Stories</h2>
+            <p>Trusted by thousands of developers and top companies</p>
           </div>
 
           <div className="testimonials-grid">
             <div className="testimonial-card">
               <div className="testimonial-content">
-                <p>"The most advanced interview system I've used. The feedback was incredibly detailed!"</p>
+                <p>"The AI feedback was spot on. It helped me identify gaps in my system design knowledge that I never noticed before."</p>
               </div>
-              <div className="testimonial-author">
-                <div className="author-avatar">SR</div>
-                <div className="author-info">
-                  <h4>Sarah Johnson</h4>
-                  <p>Senior React Developer</p>
-                </div>
+              <div className="author-info">
+                <h4>Alex Rivera</h4>
+                <p>Lead Engineer @ TechFlow</p>
               </div>
             </div>
 
             <div className="testimonial-card">
               <div className="testimonial-content">
-                <p>"Real-time metrics helped me understand my performance. Highly recommend!"</p>
+                <p>"Seamless and unbiased. The best way to practice for high-stakes technical rounds."</p>
               </div>
-              <div className="testimonial-author">
-                <div className="author-avatar">MK</div>
-                <div className="author-info">
-                  <h4>Michael Chen</h4>
-                  <p>Full Stack Developer</p>
-                </div>
+              <div className="author-info">
+                <h4>Priya Sharma</h4>
+                <p>Software Developer @ Innovate</p>
               </div>
             </div>
           </div>
@@ -355,31 +333,32 @@ const HomePage = () => {
         <div className="footer-content">
           <div className="footer-logo">
             <h2>AI Interview</h2>
-            <p>Revolutionizing technical hiring</p>
+            <p>Advancing the future of work.</p>
           </div>
-
           <div className="footer-links">
-            <a href="/privacy">Privacy Policy</a>
-            <a href="/terms">Terms of Service</a>
-            <a href="/contact">Contact Support</a>
-          </div>
-
-          <div className="footer-cta">
-            <p>Ready to start your interview journey?</p>
-            <button
-              className="btn-footer-start"
-              onClick={() => document.querySelector('.setup-section').scrollIntoView({ behavior: 'smooth' })}
-            >
-              Get Started
-            </button>
+            <div className="link-group">
+              <h4>Platform</h4>
+              <ul>
+                <li><a href="#start">Start Interview</a></li>
+                <li><a href="#">Pricing</a></li>
+                <li><a href="#">Solutions</a></li>
+              </ul>
+            </div>
+            <div className="link-group">
+              <h4>Support</h4>
+              <ul>
+                <li><a href="#">Help Center</a></li>
+                <li><a href="#">Privacy</a></li>
+                <li><a href="#">Terms</a></li>
+              </ul>
+            </div>
           </div>
         </div>
-
         <div className="footer-bottom">
-          <p>© {new Date().getFullYear()} AI Interview System. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} AI Interview. All Rights Reserved.</p>
         </div>
       </footer>
-    </div >
+    </div>
   );
 };
 

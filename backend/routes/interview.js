@@ -54,6 +54,7 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
     console.log('Skipped:', skipped);
 
     const audioFile = req.file;
+    const { skipped } = req.body;
 
     if (!audioFile && !textAnswer && !codeAnswer && skipped !== 'true') {
       return res.status(400).json({

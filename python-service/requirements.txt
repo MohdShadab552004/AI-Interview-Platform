@@ -1,12 +1,26 @@
-Flask>=2.3.3
-flask-cors>=4.0.0
-numpy>=1.24.3
+# IAIS - Intelligent AI-Powered Interview System
+# Python Dependencies
+
+# Core Computer Vision & ML
+opencv-python>=4.8.0
+mediapipe>=0.10.30
+numpy>=1.24.0
+scikit-learn>=1.3.0
+
+# OpenRouter API (replacing Gemini)
+openai>=1.0.0
+requests>=2.31.0
+
+# PDF Processing
+PyPDF2>=3.0.0
+
+# Network Monitoring (Optional - requires admin privileges)
+scapy>=2.5.0
+
+# Audio Analysis (existing)
 librosa>=0.10.0
-soundfile>=0.12.1
-openai-whisper
-torch
-torchvision
-torchaudio
-gTTS>=2.3.2
-transformers>=4.33.0
-accelerate>=0.23.0
+soundfile>=0.12.0
+scipy>=1.11.0
+
+# Utilities
+python-dateutil>=2.8.0
