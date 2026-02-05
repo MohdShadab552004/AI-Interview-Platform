@@ -4,7 +4,6 @@ import Webcam from 'react-webcam';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import { CountdownCircleTimer } from 'react-countdown-circle-timer';
-import InterviewController from '../components/InterviewController';
 import MediaAnalyzer from '../components/MediaAnalyzer';
 import CheatingDetectionManager from '../components/CheatingDetector/CheatingDetectionManager';
 import Editor from 'react-simple-code-editor';
@@ -12,8 +11,9 @@ import { highlight, languages } from 'prismjs/components/prism-core';
 import 'prismjs/components/prism-clike';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-python';
+import 'prismjs/components/prism-java';
 import 'prismjs/themes/prism-tomorrow.css';
-import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck } from 'react-icons/fi';
+import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck, FiFileText, FiCode } from 'react-icons/fi';
 
 const InterviewPage = () => {
   const { sessionId } = useParams();
@@ -23,27 +23,48 @@ const InterviewPage = () => {
   const webcamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
-  const interviewRef = useRef(null); // Add ref to track interview
-  const activeAudioRef = useRef(null); // Ref to track current playing audio
+  const interviewRef = useRef(null);
+  const activeAudioRef = useRef(null);
+  const interviewStartTimeRef = useRef(null);
 
   // State
   const [interview, setInterview] = useState(null);
-  const [currentQuestion, setCurrentQuestion] = useState(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [timerKey, setTimerKey] = useState(0);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [videoMetrics, setVideoMetrics] = useState({});
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
-  const [hasAudioFinished, setHasAudioFinished] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editorMode, setEditorMode] = useState('notepad'); // 'notepad' or 'code'
+  const [selectedLanguage, setSelectedLanguage] = useState('javascript');
+  const [codeContent, setCodeContent] = useState('// Write your code here...');
+  const [notepadContent, setNotepadContent] = useState('');
+  const [remainingTime, setRemainingTime] = useState(3600); // 1 hour = 3600 seconds
+  const [attemptedQuestions, setAttemptedQuestions] = useState(new Set());
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
   useEffect(() => {
     interviewRef.current = interview;
   }, [interview]);
+
+  // Timer countdown
+  useEffect(() => {
+    if (!isSetupComplete) return;
+
+    const timer = setInterval(() => {
+      setRemainingTime(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          endInterview();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isSetupComplete]);
 
   const getSupportedMimeType = () => {
     const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/mpeg', 'audio/webm'];
@@ -70,316 +91,124 @@ const InterviewPage = () => {
     try {
       const response = await axios.get(`${API_BASE}/interview/status/${sessionId}`);
       if (response.data.success) {
-        setInterview(response.data.interview);
-        const currentQ = response.data.interview.questions[response.data.interview.currentQuestion];
-        setCurrentQuestion(currentQ);
+        console.log('📋 Interview loaded:', response.data.interview);
+        console.log('📝 Total questions:', response.data.interview.questions.length);
+        console.log('🎯 First question:', response.data.interview.questions[0]);
 
-        if (currentQ && isSetupComplete) {
-          console.log("Playing question text:", currentQ.text);
-          playQuestion(currentQ.text, currentQ.audio);
-        }
+        setInterview(response.data.interview);
+        setCurrentQuestionIndex(response.data.interview.currentQuestion || 0);
       }
     } catch (error) {
+      console.error('❌ Failed to load interview:', error);
       toast.error("Failed to load interview session");
     }
   };
 
-  const playQuestion = async (text, audioBase64 = null) => {
-    try {
-      if (mediaRecorderRef.current && isRecording) {
-        mediaRecorderRef.current.stop();
-        setIsRecording(false);
-      }
-
-      if (activeAudioRef.current) {
-        activeAudioRef.current.pause();
-      }
-
-      setIsPlaying(true);
-      setHasAudioFinished(false);
-      let audioBlob;
-
-      if (audioBase64) {
-        const byteCharacters = atob(audioBase64);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        audioBlob = new Blob([new Uint8Array(byteNumbers)], { type: 'audio/mp3' });
-      } else {
-        const response = await axios.post(`${API_BASE}/ai/text-to-speech`, { text }, { responseType: "blob" });
-        audioBlob = response.data;
-      }
-
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      activeAudioRef.current = audio;
-
-      audio.oncanplaythrough = () => {
-        audio.play().catch(() => {
-          setIsPlaying(false);
-          setHasAudioFinished(true);
-          startRecording();
-        });
-      };
-
-      audio.onended = () => {
-        setIsPlaying(false);
-        setHasAudioFinished(true);
-        URL.revokeObjectURL(audioUrl);
-        activeAudioRef.current = null;
-        setTimeout(startRecording, 500);
-      };
-
-      audio.onerror = () => {
-        setIsPlaying(false);
-        setHasAudioFinished(true); // Allow them to move on if audio fails
-        URL.revokeObjectURL(audioUrl);
-        activeAudioRef.current = null;
-        startRecording();
-      };
-    } catch (error) {
-      console.error(error);
-      setIsPlaying(false);
-      setHasAudioFinished(true);
-      startRecording();
-    }
+  const navigateToQuestion = (index) => {
+    if (!interview || index < 0 || index >= interview.questions.length) return;
+    setCurrentQuestionIndex(index);
+    // Reset editor content
+    setCodeContent('// Write your code here...');
+    setNotepadContent('');
   };
 
-  const handleRecordingStop = async () => {
-    const currentInterview = interviewRef.current;
-    if (!currentInterview) return;
+  const submitAnswer = async () => {
+    if (isSubmitting || !interview) return;
 
-    if (webcamRef.current && webcamRef.current.srcObject) {
-      webcamRef.current.srcObject.getTracks().forEach(track => track.stop());
-    }
+    const currentQ = interview.questions[currentQuestionIndex];
 
-    if (audioChunksRef.current.length === 0) {
-      toast.error("No audio recorded");
-      return;
-    }
-
-    const audioBlob = new Blob(audioChunksRef.current, {
-      type: mediaRecorderRef.current?.mimeType || 'audio/webm'
-    });
-
-    const formData = new FormData();
-    formData.append("audio", audioBlob, "answer.webm");
-    formData.append("interviewId", sessionId);
-    formData.append("questionIndex", currentInterview.currentQuestion);
-    formData.append("videoMetrics", JSON.stringify(videoMetrics));
-
-    if (window.textAnswer) {
-      formData.append("textAnswer", window.textAnswer);
-      window.textAnswer = '';
-    }
-    if (window.codeAnswer) {
-      formData.append("codeAnswer", window.codeAnswer);
-      window.codeAnswer = '';
-    }
+    setIsSubmitting(true);
+    toast.loading("Submitting answer...", { id: 'submit' });
 
     try {
-      if (isSubmitting) return;
-      setIsSubmitting(true);
-      toast.loading("Processing answer...");
-      console.log("Submitting answer API call to:", `${API_BASE}/interview/submit-answer`);
+      const formData = new FormData();
+      formData.append("interviewId", sessionId);
+      formData.append("questionIndex", currentQuestionIndex);
+      formData.append("videoMetrics", JSON.stringify(videoMetrics));
+
+      if (editorMode === 'code') {
+        formData.append("codeAnswer", codeContent);
+        formData.append("language", selectedLanguage);
+      } else {
+        formData.append("textAnswer", notepadContent);
+      }
+
+      // Add empty audio blob to satisfy backend
+      const emptyBlob = new Blob([], { type: 'audio/webm' });
+      formData.append("audio", emptyBlob, "answer.webm");
 
       const response = await axios.post(
         `${API_BASE}/interview/submit-answer`,
         formData,
         {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+          headers: { 'Content-Type': 'multipart/form-data' },
           timeout: 30000
         }
       );
 
-      toast.dismiss();
+      toast.dismiss('submit');
+
       if (response.data.success) {
-        if (response.data.isComplete) {
-          navigate(`/results/${sessionId}`);
+        // Mark question as attempted
+        setAttemptedQuestions(prev => new Set([...prev, currentQuestionIndex]));
+
+        toast.success("Answer submitted!");
+
+        // Move to next question if available
+        if (currentQuestionIndex < interview.questions.length - 1) {
+          navigateToQuestion(currentQuestionIndex + 1);
         } else {
-          setInterview(prev => ({
-            ...prev,
-            currentQuestion: prev.currentQuestion + 1,
-            metrics: { ...prev.metrics, completedQuestions: prev.metrics.completedQuestions + 1 }
-          }));
-          setCurrentQuestion(response.data.nextQuestion);
-          setHasAudioFinished(false);
-
-          setTimeout(() => {
-            playQuestion(response.data.nextQuestion.text, response.data.nextQuestion.audio);
-          }, 1000);
+          toast.success("All questions completed!");
         }
       }
     } catch (error) {
-      toast.dismiss();
-      toast.error("Failed to submit response");
+      toast.dismiss('submit');
+      toast.error("Failed to submit answer");
     } finally {
       setIsSubmitting(false);
-      // Clear audio chunks for next recording
-      audioChunksRef.current = [];
     }
   };
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480 },
-        audio: { echoCancellation: true, noiseSuppression: true }
-      });
-
-      if (webcamRef.current) webcamRef.current.srcObject = stream;
-
-      const mimeType = getSupportedMimeType();
-      const mediaRecorder = new MediaRecorder(new MediaStream([stream.getAudioTracks()[0]]), {
-        mimeType,
-        audioBitsPerSecond: 128000
-      });
-
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = handleRecordingStop;
-      mediaRecorder.onstart = () => {
-        setIsRecording(true);
-        setTimerKey(prev => prev + 1);
-        toast.success("Recording started");
-      };
-
-      mediaRecorder.start(100);
-    } catch (err) {
-      toast.error("Recording error: Please check device permissions");
-      setIsRecording(false);
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-    }
-  };
-
-  const skipQuestion = async () => {
-    console.log("skipQuestion called");
-
-    if (isSubmitting) return;
-
-    // Stop current audio if playing
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current = null;
-    }
-    if (!window.confirm("Skip this question?")) return;
-
-    if (activeAudioRef.current) {
-      activeAudioRef.current.pause();
-      activeAudioRef.current = null;
-      setIsPlaying(false);
-    }
-
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-
-    try {
-      setIsSubmitting(true);
-      toast.loading("Skipping question...", { id: 'skip-toast' });
-
-      const formData = new FormData();
-      formData.append("interviewId", sessionId);
-      formData.append("questionIndex", interview.currentQuestion);
-      formData.append("skipped", "true");
-
-      const response = await axios.post(
-        `${API_BASE}/interview/submit-answer`,
-        formData
-      );
-
-      console.log("Skip response:", response.data);
-
-      if (response.data.success) {
-        toast.success("Question skipped", { id: 'skip-toast' });
-        if (response.data.isComplete) {
-          navigate(`/results/${sessionId}`);
-          return;
-        }
-
-        const nextQ = response.data.nextQuestion;
-        if (nextQ) {
-          setCurrentQuestion(nextQ);
-          setHasAudioFinished(false);
-          setInterview((prev) => {
-            if (!prev) return null;
-            return {
-              ...prev,
-              currentQuestion: prev.currentQuestion + 1,
-              metrics: {
-                ...prev.metrics,
-                completedQuestions: prev.metrics.completedQuestions + 1,
-              },
-            };
-          });
-
-          setTimeout(() => {
-            playQuestion(nextQ.text, nextQ.audio);
-          }, 1000);
-        }
-      }
-    } catch (error) {
-      console.error("skipQuestion error:", error);
-      toast.error("Failed to skip question", { id: 'skip-toast' });
-    } finally {
-      setIsSubmitting(false);
+  const skipQuestion = () => {
+    if (currentQuestionIndex < interview.questions.length - 1) {
+      navigateToQuestion(currentQuestionIndex + 1);
+      toast.info("Question skipped");
+    } else {
+      toast.info("This is the last question");
     }
   };
 
   const endInterview = async () => {
-    if (!window.confirm("End interview early?")) return;
-
     try {
-      // 1. Stop current audio if playing
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
       }
-      setIsPlaying(false);
-      window.speechSynthesis?.cancel();
 
-      // 2. Stop recording if active
-      if (mediaRecorderRef.current && isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
-        setIsRecording(false);
       }
 
-      // 3. Stop webcam and microphone
       if (webcamRef.current && webcamRef.current.video && webcamRef.current.video.srcObject) {
-        webcamRef.current.video.srcObject.getTracks().forEach(track => {
-          track.stop();
-        });
+        webcamRef.current.video.srcObject.getTracks().forEach(track => track.stop());
       }
 
-      // 4. Clear loading/submitting states
-      setIsSubmitting(false);
-      setHasAudioFinished(false);
-
-      // 5. Call backend to end interview
       toast.loading("Ending interview...", { id: 'end-interview' });
       await axios.post(`${API_BASE}/interview/end/${sessionId}`);
       toast.success("Interview ended", { id: 'end-interview' });
 
-      // 6. Navigate to results
       navigate(`/results/${sessionId}`);
     } catch (error) {
       console.error("Error ending interview:", error);
       toast.error("Failed to end interview", { id: 'end-interview' });
     }
+  };
+
+  const formatTime = (seconds) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (!interview) {
@@ -391,13 +220,20 @@ const InterviewPage = () => {
     );
   }
 
+  const currentQuestion = interview.questions[currentQuestionIndex];
   const isSetupMode = !isSetupComplete;
 
   return (
-    <div className="interview-page">
-      <header className="interview-header">
-        <h1>AI Interview Session</h1>
-        <p>{interview.position} | {interview.candidateName}</p>
+    <div className="interview-page-new">
+      <header className="interview-header-new">
+        <div>
+          <h1>AI Interview Session</h1>
+          <p>{interview.position} | {interview.candidateName}</p>
+        </div>
+        <div className="timer-display">
+          <span className="timer-label">Time Remaining:</span>
+          <span className="timer-value">{formatTime(remainingTime)}</span>
+        </div>
       </header>
 
       {isSetupMode ? (
@@ -436,18 +272,13 @@ const InterviewPage = () => {
                 className={`btn-start-session ${isCalibrated ? 'ready' : ''}`}
                 disabled={!isCalibrated}
                 onClick={() => {
-                  // Request fullscreen
                   if (document.documentElement.requestFullscreen) {
                     document.documentElement.requestFullscreen().catch(err => {
                       console.warn("Fullscreen request failed:", err);
-                      toast.error("Please enable fullscreen manually (F11)");
                     });
                   }
-
                   setIsSetupComplete(true);
-                  if (currentQuestion) {
-                    playQuestion(currentQuestion.text, currentQuestion.audio);
-                  }
+                  interviewStartTimeRef.current = Date.now();
                 }}
                 style={{
                   padding: '16px',
@@ -468,7 +299,7 @@ const InterviewPage = () => {
           </div>
         </div>
       ) : (
-        <div className="interview-container">
+        <div className="interview-layout">
           <CheatingDetectionManager
             interviewId={sessionId}
             isActive={!isSetupMode}
@@ -476,8 +307,11 @@ const InterviewPage = () => {
             audioLevel={audioLevel}
             webcamRef={webcamRef}
           />
-          <div className="video-column">
-            <div className="video-container">
+
+          {/* Left Panel */}
+          <div className="left-panel">
+            {/* Camera */}
+            <div className="camera-section">
               <Webcam
                 ref={webcamRef}
                 audio={false}
@@ -491,12 +325,8 @@ const InterviewPage = () => {
                 onAudioLevel={setAudioLevel}
                 skipCalibration={true}
               />
-              {(videoMetrics.detectedObjects?.length > 0 || videoMetrics.gazePattern === 'suspicious_side' || videoMetrics.gazePattern === 'suspicious_side_eye') && (
-                <div className="proctor-alert" style={{
-                  background: (videoMetrics.gazePattern && videoMetrics.gazePattern.includes('suspicious')) ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                  color: (videoMetrics.gazePattern && videoMetrics.gazePattern.includes('suspicious')) ? '#fbbf24' : '#f87171',
-                  borderColor: (videoMetrics.gazePattern && videoMetrics.gazePattern.includes('suspicious')) ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'
-                }}>
+              {(videoMetrics.detectedObjects?.length > 0 || videoMetrics.gazePattern?.includes('suspicious')) && (
+                <div className="proctor-alert-new">
                   <FiAlertCircle />
                   {videoMetrics.detectedObjects?.length > 0
                     ? `Detected: ${videoMetrics.detectedObjects.join(', ')}`
@@ -505,107 +335,136 @@ const InterviewPage = () => {
               )}
             </div>
 
-            <div className="audio-level">
-              <div className="audio-bar" style={{ width: `${Math.min(100, audioLevel * 100)}%` }} />
-            </div>
-
-            <div className="metrics-display">
+            {/* Metrics */}
+            <div className="metrics-panel">
               <h3>Live AI Proctoring</h3>
-              <div className="metrics-grid">
-                <div className="metric">
-                  <span className="metric-label">Attention Source</span>
+              <div className="metrics-grid-new">
+                <div className="metric-new">
+                  <span className="metric-label">Attention</span>
                   <span className="metric-value">{Math.round((videoMetrics.attention || 0) * 100)}%</span>
                 </div>
-                <div className="metric">
+                <div className="metric-new">
                   <span className="metric-label">Eye Contact</span>
                   <span className="metric-value">{Math.round((videoMetrics.eyeContact || 0) * 100)}%</span>
                 </div>
-                <div className="metric">
-                  <span className="metric-label">Stress Indice</span>
+                <div className="metric-new">
+                  <span className="metric-label">Stress</span>
                   <span className="metric-value" style={{ color: (videoMetrics.stress || 0) > 0.5 ? '#f87171' : '#34d399' }}>
                     {Math.round((videoMetrics.stress || 0) * 100)}%
                   </span>
                 </div>
-                <div className="metric">
-                  <span className="metric-label">Connectivity</span>
+                <div className="metric-new">
+                  <span className="metric-label">Network</span>
                   <span className="metric-value">{Math.round((videoMetrics.networkQuality || 1) * 100)}%</span>
                 </div>
               </div>
             </div>
+
+            {/* Question Navigator */}
+            <div className="question-navigator">
+              <h3>Questions ({attemptedQuestions.size}/25)</h3>
+              <div className="question-grid">
+                {interview.questions.map((q, idx) => (
+                  <button
+                    key={idx}
+                    className={`question-block ${idx === currentQuestionIndex ? 'active' : ''} ${attemptedQuestions.has(idx) ? 'attempted' : ''}`}
+                    onClick={() => navigateToQuestion(idx)}
+                  >
+                    {idx + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          <div className="control-column">
-            <div className="question-card">
-              <div className="question-header">
-                <span className="question-type">{currentQuestion?.type}</span>
-                <span className="question-difficulty">{currentQuestion?.difficulty}</span>
-              </div>
-              <p className="question-text">{currentQuestion?.text}</p>
-
-              {isRecording && (
-                <div className="recording-indicator">
-                  <CountdownCircleTimer
-                    key={timerKey}
-                    isPlaying={isRecording}
-                    duration={currentQuestion?.expectedTime || 120}
-                    colors={['#10B981', '#F59E0B', '#EF4444']}
-                    colorsTime={[60, 30, 0]}
-                    size={100}
-                    strokeWidth={8}
-                    onComplete={stopRecording}
-                  >
-                    {({ remainingTime }) => <div className="timer-val">{remainingTime}s</div>}
-                  </CountdownCircleTimer>
-                  <p className="rec-status">Recording Active</p>
+          {/* Right Panel */}
+          <div className="right-panel">
+            <div className="question-display">
+              <div className="question-header-new">
+                <span className="question-number">Question {currentQuestionIndex + 1}/25</span>
+                <div className="question-badges">
+                  <span className="question-type">{currentQuestion?.type || 'general'}</span>
+                  <span className="question-difficulty">{currentQuestion?.difficulty || 'medium'}</span>
                 </div>
-              )}
+              </div>
+              <p className="question-text-new">{currentQuestion?.text}</p>
+            </div>
 
-              {/* Controls */}
-              <InterviewController
-                isRecording={isRecording}
-                isPlaying={isPlaying}
-                hasAudioFinished={hasAudioFinished}
-                onStartRecording={startRecording}
-                onStopRecording={stopRecording}
-                onSkipQuestion={skipQuestion}
-                onEndInterview={endInterview}
-                onPlayQuestion={() => playQuestion(currentQuestion?.text, currentQuestion?.audio)}
-                disabled={!currentQuestion || isSubmitting}
-              />
+            {/* Editor Mode Toggle */}
+            <div className="editor-mode-toggle">
+              <button
+                className={`mode-btn ${editorMode === 'notepad' ? 'active' : ''}`}
+                onClick={() => setEditorMode('notepad')}
+              >
+                <FiFileText /> Notepad
+              </button>
+              <button
+                className={`mode-btn ${editorMode === 'code' ? 'active' : ''}`}
+                onClick={() => setEditorMode('code')}
+              >
+                <FiCode /> Code Editor
+              </button>
+            </div>
 
-              {isPlaying && <div className="playing-pulse"><div className="pulse-dot"></div> Listening...</div>}
+            {/* Editor Area */}
+            {editorMode === 'notepad' ? (
+              <div className="notepad-editor">
+                <textarea
+                  value={notepadContent}
+                  onChange={(e) => setNotepadContent(e.target.value)}
+                  placeholder="Write your answer here... (for email writing, paragraph, explanation, etc.)"
+                  className="notepad-textarea"
+                />
+              </div>
+            ) : (
+              <div className="code-editor-area">
+                <div className="code-editor-header">
+                  <select
+                    value={selectedLanguage}
+                    onChange={(e) => setSelectedLanguage(e.target.value)}
+                    className="language-selector"
+                  >
+                    <option value="javascript">JavaScript</option>
+                    <option value="python">Python</option>
+                    <option value="java">Java</option>
+                  </select>
+                </div>
+                <Editor
+                  value={codeContent}
+                  onValueChange={code => setCodeContent(code)}
+                  highlight={code => {
+                    const lang = languages[selectedLanguage] || languages.javascript;
+                    return highlight(code, lang);
+                  }}
+                  padding={20}
+                  className="code-editor-main"
+                  style={{
+                    minHeight: '400px',
+                    fontSize: '14px',
+                    fontFamily: '"Fira Code", "Courier New", monospace',
+                    background: '#1e1e1e',
+                    color: '#d4d4d4'
+                  }}
+                />
+              </div>
+            )}
 
-              {
-                !isPlaying && !isRecording && currentQuestion?.type !== 'code' && (
-                  <textarea
-                    placeholder="Optional: Type your thoughts or notes here..."
-                    className="answer-textarea"
-                    onChange={(e) => window.textAnswer = e.target.value}
-                  />
-                )
-              }
-
-              {
-                currentQuestion?.type === 'code' && !isRecording && !isPlaying && (
-                  <div className="code-editor-box">
-                    <div className="editor-tab">Code Editor ({currentQuestion.language || 'JS'})</div>
-                    <Editor
-                      value={window.codeAnswer || ''}
-                      onValueChange={code => window.codeAnswer = code}
-                      highlight={code => highlight(code, languages.javascript)}
-                      padding={20}
-                      className="prism-editor"
-                    />
-                  </div>
-                )
-              }
-            </div >
-
-
-          </div >
-        </div >
+            {/* Action Buttons */}
+            <div className="action-buttons">
+              <button className="btn-skip" onClick={skipQuestion} disabled={isSubmitting}>
+                Skip Question
+              </button>
+              <button className="btn-submit" onClick={submitAnswer} disabled={isSubmitting}>
+                {isSubmitting ? 'Submitting...' : 'Submit Answer'}
+              </button>
+              <button className="btn-end" onClick={endInterview}>
+                End Interview
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </div >
+    </div>
   );
 };
 
