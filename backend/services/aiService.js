@@ -84,7 +84,7 @@ class AIService {
       3. Practical experience scenarios
       4. Behavioral questions
       
-      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario), expectedTime (in seconds), difficulty (easy/medium/hard)
+      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint (optional, for code questions)
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
     `;
@@ -241,6 +241,7 @@ class AIService {
       - expectedTime (in seconds)
       - difficulty (medium/hard)
       - language (if type is code, suggest python/java/cpp/js or "any")
+      - hint (if type is "code", provide a small conceptual hint, otherwise null)
       
       IMPORTANT: Return ONLY valid JSON.
     `;
@@ -275,7 +276,7 @@ class AIService {
       [
         { "round": 1, "question": "...", "type": "cv-analysis", "expectedTime": 90, "difficulty": "medium" },
         ...
-        { "round": 2, "question": "Write a function...", "type": "code", "language": "python/java/js", "expectedTime": 300, "difficulty": "hard" },
+        { "round": 2, "question": "Write a function...", "type": "code", "language": "python/java/js", "expectedTime": 300, "difficulty": "hard", "hint": "Consider using a hash map..." },
         ...
       ]
 
@@ -321,7 +322,8 @@ class AIService {
         type: isCode ? "code" : "technical-problem",
         expectedTime: 300,
         difficulty: "hard",
-        language: isCode ? "javascript" : null
+        language: isCode ? "javascript" : null,
+        hint: isCode ? "Think about the data structure's properties." : null
       });
     }
     // Round 3
@@ -366,7 +368,7 @@ class AIService {
       3. Practical experience scenarios
       4. Behavioral questions
       
-      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario), expectedTime (in seconds), difficulty (easy/medium/hard)
+      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint (optional, for 'code' type)
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
     `;
@@ -479,7 +481,7 @@ class AIService {
   }
 
   // Evaluate single answer
-  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics }) {
+  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics, hintUsed }) {
     const prompt = `
       Evaluate this interview answer:
       
@@ -496,13 +498,17 @@ class AIService {
       - Eye Contact: ${videoMetrics.eyeContact}
       - Attention Level: ${videoMetrics.attention}
       - Professionalism: ${videoMetrics.professionalism}
+
+      Hint Used: ${hintUsed ? "YES (Penalty required: deduct 10-15% score)" : "NO"}
+
+      Hint Used: ${metrics?.hintUsed ? "YES (Penalty required)" : "NO"}
       
       Provide evaluation in this JSON format:
       {
         "technicalAccuracy": 0-10,
         "communicationSkills": 0-10,
         "confidenceScore": 0-10,
-        "overallScore": 0-10,
+        "overallScore": 0-10 (Deduct 1-2 points if Hint Used is YES),
         "strengths": ["array", "of", "strengths"],
         "improvements": ["areas", "to", "improve"],
         "feedback": "detailed feedback text"
@@ -640,31 +646,36 @@ class AIService {
         question: `Tell me about your experience with ${position} and why you're interested in this role.`,
         type: "behavioral",
         expectedTime: 120,
-        difficulty: "easy"
+        difficulty: "easy",
+        hint: null
       },
       {
-        question: `Explain a key technical concept relevant to ${position}.`,
-        type: "technical",
-        expectedTime: 90,
-        difficulty: "medium"
+        question: `Write a function to reverse a string in your preferred language.`,
+        type: "code",
+        expectedTime: 300,
+        difficulty: "medium",
+        hint: "Consider iterating through the string backwards or using built-in reverse methods."
       },
       {
         question: "How do you approach solving complex problems in your work?",
         type: "technical",
         expectedTime: 120,
-        difficulty: "medium"
+        difficulty: "medium",
+        hint: null
       },
       {
         question: "Describe a challenging project you worked on and how you overcame obstacles.",
         type: "scenario",
         expectedTime: 150,
-        difficulty: "hard"
+        difficulty: "hard",
+        hint: null
       },
       {
         question: "What are your strengths and areas for improvement in technical work?",
         type: "behavioral",
         expectedTime: 90,
-        difficulty: "medium"
+        difficulty: "medium",
+        hint: null
       }
     ];
 

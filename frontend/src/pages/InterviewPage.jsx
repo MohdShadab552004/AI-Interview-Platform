@@ -41,6 +41,9 @@ const InterviewPage = () => {
   const [notepadContent, setNotepadContent] = useState('');
   const [remainingTime, setRemainingTime] = useState(3600); // 1 hour = 3600 seconds
   const [attemptedQuestions, setAttemptedQuestions] = useState(new Set());
+  const [showHintConfirm, setShowHintConfirm] = useState(false);
+  const [hintVisible, setHintVisible] = useState(false);
+  const [hintUsed, setHintUsed] = useState(false);
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
@@ -97,6 +100,15 @@ const InterviewPage = () => {
 
         setInterview(response.data.interview);
         setCurrentQuestionIndex(response.data.interview.currentQuestion || 0);
+
+        // Initialize attempted questions
+        const answered = new Set();
+        response.data.interview.questions.forEach((q, idx) => {
+          if (q.answer && q.answer !== 'not attempted') {
+            answered.add(idx);
+          }
+        });
+        setAttemptedQuestions(answered);
       }
     } catch (error) {
       console.error('❌ Failed to load interview:', error);
@@ -110,6 +122,9 @@ const InterviewPage = () => {
     // Reset editor content
     setCodeContent('// Write your code here...');
     setNotepadContent('');
+    setShowHintConfirm(false);
+    setHintVisible(false);
+    setHintUsed(false);
   };
 
   const submitAnswer = async () => {
@@ -132,6 +147,8 @@ const InterviewPage = () => {
       } else {
         formData.append("textAnswer", notepadContent);
       }
+
+      formData.append("hintUsed", hintUsed);
 
       // Add empty audio blob to satisfy backend
       const emptyBlob = new Blob([], { type: 'audio/webm' });
@@ -362,7 +379,7 @@ const InterviewPage = () => {
 
             {/* Question Navigator */}
             <div className="question-navigator">
-              <h3>Questions ({attemptedQuestions.size}/25)</h3>
+              <h3>Questions ({currentQuestionIndex + 1}/{interview.questions.length})</h3>
               <div className="question-grid">
                 {interview.questions.map((q, idx) => (
                   <button
@@ -388,6 +405,42 @@ const InterviewPage = () => {
                 </div>
               </div>
               <p className="question-text-new">{currentQuestion?.text}</p>
+
+              {/* Hint Section */}
+              {currentQuestion?.type === 'code' && currentQuestion?.hint && (
+                <div className="hint-section" style={{ marginTop: '15px' }}>
+                  {!hintVisible ? (
+                    <button
+                      onClick={() => setShowHintConfirm(true)}
+                      className="btn-get-hint"
+                      style={{
+                        background: '#f59e0b',
+                        color: 'white',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                      }}
+                    >
+                      <FiAlertCircle /> Get Hint (Penalty Applies)
+                    </button>
+                  ) : (
+                    <div className="hint-display" style={{
+                      background: '#fffbeb',
+                      border: '1px solid #fcd34d',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      color: '#92400e'
+                    }}>
+                      <strong>💡 Hint:</strong> {currentQuestion.hint}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Editor Mode Toggle */}
@@ -462,9 +515,57 @@ const InterviewPage = () => {
               </button>
             </div>
           </div>
+          {/* Hint Confirmation Modal */}
+          {showHintConfirm && (
+            <div className="modal-overlay" style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.7)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center', zIndex: 1000
+            }}>
+              <div className="modal-content" style={{
+                background: '#1e1e1e', padding: '24px', borderRadius: '12px',
+                maxWidth: '400px', width: '90%', textAlign: 'center',
+                border: '1px solid #333'
+              }}>
+                <div style={{ color: '#f59e0b', fontSize: '48px', marginBottom: '16px' }}>
+                  <FiAlertCircle />
+                </div>
+                <h3 style={{ color: 'white', marginBottom: '12px' }}>Use Hint?</h3>
+                <p style={{ color: '#ccc', marginBottom: '24px' }}>
+                  Using a hint will result in a <strong>score deduction</strong> for this question.
+                  Are you sure you want to proceed?
+                </p>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <button
+                    onClick={() => setShowHintConfirm(false)}
+                    style={{
+                      padding: '10px 20px', borderRadius: '6px',
+                      background: '#333', color: 'white', border: 'none', cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      setHintVisible(true);
+                      setHintUsed(true);
+                      setShowHintConfirm(false);
+                    }}
+                    style={{
+                      padding: '10px 20px', borderRadius: '6px',
+                      background: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    Yes, Show Hint
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </div >
   );
 };
 

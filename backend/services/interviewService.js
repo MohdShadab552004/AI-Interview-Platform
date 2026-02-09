@@ -57,7 +57,10 @@ class InterviewService {
       voiceAnalysis: null,
       videoMetrics: null,
       aiEvaluation: null,
-      language: q.language || null // for coding questions
+      videoMetrics: null,
+      aiEvaluation: null,
+      language: q.language || null, // for coding questions
+      hint: q.hint || null // for coding hints
     }));
 
     // Attach audio to the first question
@@ -136,7 +139,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped, hintUsed }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -175,6 +178,9 @@ class InterviewService {
       };
       question.answeredAt = Date.now();
     } else {
+      // Store hint usage
+      question.hintUsed = hintUsed === 'true' || hintUsed === true;
+
       // Store non-audio answers immediately
       if (textAnswer) {
         question.answer = textAnswer;
@@ -197,7 +203,8 @@ class InterviewService {
           audioMimeType,
           videoMetrics,
           textAnswer,
-          codeAnswer
+          codeAnswer,
+          hintUsed: hintUsed === 'true' || hintUsed === true
         }, {
           attempts: 3,
           backoff: 5000
@@ -213,7 +220,8 @@ class InterviewService {
           audioMimeType,
           videoMetrics,
           textAnswer,
-          codeAnswer
+          codeAnswer,
+          hintUsed: hintUsed === 'true' || hintUsed === true
         }).catch(err => console.error('Direct processing error:', err));
       }
 
