@@ -35,16 +35,22 @@ class InterviewService {
     const timestamp = Date.now();
 
     let questions = [];
+    let initialTokenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
     if (cvBuffer) {
       // CV-based flow - NEW Full 25-Question Structure
       const cvText = await aiService.extractTextFromPDF(cvBuffer);
 
       // Generate all 25 questions in one go logic
-      questions = await aiService.generateFullInterview(cvText, position, experienceLevel, 25);
+      const result = await aiService.generateFullInterview(cvText, position, experienceLevel, 25);
+      questions = result.questions;
+      // Initialize usage with generation cost
+      initialTokenUsage = result.usage || { total_tokens: 0 };
     } else {
       // Fallback old flow (without CV)
-      questions = await aiService.generateQuestions(position, experienceLevel, 5);
+      const result = await aiService.generateQuestions(position, experienceLevel, 5);
+      questions = result.questions;
+      initialTokenUsage = result.usage || { total_tokens: 0 };
     }
 
     const formattedQuestions = questions.map((q, i) => ({
@@ -91,7 +97,8 @@ class InterviewService {
       },
       finalEvaluation: null,
       cheatLogs: [],
-      riskScore: 0
+      riskScore: 0,
+      tokenUsage: initialTokenUsage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     };
 
     // Store in Redis with 24h expiry if connected, otherwise in memory
@@ -277,12 +284,14 @@ class InterviewService {
       evaluation: q.aiEvaluation
     }));
 
-    return await aiService.generateFinalReport({
+    const result = await aiService.generateFinalReport({
       candidateName: interview.candidateName,
       position: interview.position,
       answers: answersSummary,
       metrics: interview.metrics
     });
+
+    return { report: result.report, usage: result.usage };
   }
 
   async endInterview(interviewId) {
@@ -314,7 +323,16 @@ class InterviewService {
       interview.endTime = Date.now();
 
       // Generate final evaluation
-      interview.finalEvaluation = await this.generateFinalEvaluation(interview);
+      const finalResult = await this.generateFinalEvaluation(interview);
+      interview.finalEvaluation = finalResult.report;
+
+      // Update token usage
+      if (finalResult.usage) {
+        if (!interview.tokenUsage) interview.tokenUsage = { total_tokens: 0 };
+        interview.tokenUsage.total_tokens = (interview.tokenUsage.total_tokens || 0) + (finalResult.usage.total_tokens || 0);
+        interview.tokenUsage.prompt_tokens = (interview.tokenUsage.prompt_tokens || 0) + (finalResult.usage.prompt_tokens || 0);
+        interview.tokenUsage.completion_tokens = (interview.tokenUsage.completion_tokens || 0) + (finalResult.usage.completion_tokens || 0);
+      }
 
       await this.saveInterview(interview);
     }

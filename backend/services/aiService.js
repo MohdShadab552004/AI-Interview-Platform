@@ -102,7 +102,15 @@ class AIService {
       console.log(responseContent);
       console.log('--- [Hugging Face Raw Response End] ---');
 
-      return responseContent.trim();
+      return {
+        content: responseContent.trim(),
+        usage: {
+          prompt_tokens: Math.ceil(prompt.length / 4),
+          completion_tokens: Math.ceil(responseContent.length / 4),
+          total_tokens: Math.ceil(estimatedTokens),
+          estimated: true
+        }
+      };
 
     } catch (error) {
       console.error(`Hugging Face API Error (${this.hfModel}):`, error.message);
@@ -120,7 +128,17 @@ class AIService {
           if (result.choices && result.choices.length > 0) {
             const content = result.choices[0].message.content;
             console.log('[AI Service] Fallback model successful.');
-            return content;
+
+            const fbEstTokens = Math.ceil((prompt.length + content.length) / 4);
+            return {
+              content: content,
+              usage: {
+                prompt_tokens: Math.ceil(prompt.length / 4),
+                completion_tokens: Math.ceil(content.length / 4),
+                total_tokens: fbEstTokens,
+                estimated: true
+              }
+            };
           }
         } catch (fallbackError) {
           console.error('Fallback model also failed:', fallbackError.message);
@@ -178,8 +196,11 @@ class AIService {
 
       if (response.data && response.data.choices && response.data.choices.length > 0) {
         // Track tokens if available
+        let usageData = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
         if (response.data.usage) {
           const usage = response.data.usage;
+          usageData = usage;
 
           // Update Session Total (HEAD logic)
           const tokens = usage.total_tokens || 0;
@@ -196,10 +217,15 @@ class AIService {
           // Fallback estimation (HEAD logic)
           const estimatedTokens = Math.ceil((prompt.length + (response.data.choices[0].message.content || "").length) / 4);
           this.totalSessionTokens += estimatedTokens;
+          usageData.total_tokens = estimatedTokens;
+
           console.log(`[Token Tracker] Estimated Request: ${estimatedTokens} tokens | Session Total: ${this.totalSessionTokens} tokens`);
         }
 
-        return response.data.choices[0].message.content;
+        return {
+          content: response.data.choices[0].message.content,
+          usage: usageData
+        };
       }
       throw new Error('No valid response from OpenRouter API');
     } catch (error) {
@@ -228,6 +254,12 @@ class AIService {
           console.warn('Failed to parse JSON from code block');
         }
       }
+
+      // 2.5 Clean basic markdown if present without code blocks
+      const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      try {
+        return JSON.parse(cleaned);
+      } catch (e2_5) { }
 
       // 3. Brute force: Find first '{' or '[' and last '}' or ']'
       try {
@@ -274,20 +306,22 @@ class AIService {
     `;
 
     try {
-      const text = await this.callAI(prompt);
-      console.log('OpenRouter raw response (Questions):', text);
+      const { content, usage } = await this.callAI(prompt);
+      console.log('OpenRouter raw response (Questions):', content);
 
-      const parsed = await this.parseJSONResponse(text);
+      const parsed = await this.parseJSONResponse(content);
       if (parsed) {
         console.log('Successfully parsed questions:', parsed);
-        return parsed;
+        return { questions: parsed, usage };
       }
 
       console.log('No JSON found in response, using fallback');
-      return this.getFallbackQuestions(position, count);
+      const fallbackQuestions = this.getFallbackQuestions(position, count);
+      return { questions: fallbackQuestions, usage };
     } catch (error) {
       console.error('Error generating questions with OpenRouter:', error);
-      return this.getFallbackQuestions(position, count);
+      const fallbackQuestions = this.getFallbackQuestions(position, count);
+      return { questions: fallbackQuestions, usage: { total_tokens: 0 } };
     }
   }
 
@@ -335,7 +369,38 @@ class AIService {
 
       // 2. Fallback to Python Whisper Service
       console.log('Sending audio to local Python Whisper service...');
-      // ... (Python service call logic remains the same check below or assume fail)
+
+      const formData = new FormData();
+      formData.append('audio', audioBuffer, {
+        filename: 'audio.wav',  // Python service expects a filename with extension
+        contentType: mimeType || 'audio/wav'
+      });
+
+      try {
+        const response = await axios.post(`${env.PYTHON_SERVICE_URL}/transcribe`, formData, {
+          headers: {
+            ...formData.getHeaders()
+          },
+          timeout: 30000 // 30s timeout
+        });
+
+        if (response.data && response.data.success) {
+          console.log(`Python Service Transcription successful:`, response.data.text.substring(0, 50) + "...");
+          return {
+            text: response.data.text,
+            language: "en",
+            duration: metadata.duration || 0,
+            confidence: 0.95,
+            provider: 'python-whisper-local'
+          };
+        } else {
+          throw new Error(response.data.error || "Python service returned unsuccessful");
+        }
+      } catch (pyError) {
+        console.error("Python Transcription Service failed:", pyError.message);
+        // proceed to error throw below to trigger soft fallback
+      }
+
       throw new Error("All transcription services failed");
 
     } catch (error) {
@@ -424,12 +489,17 @@ class AIService {
 
     try {
       const results = await Promise.all([p1, p2, p3]);
-      const allQuestions = [...results[0], ...results[1], ...results[2]];
+      const allQuestions = [...results[0].questions, ...results[1].questions, ...results[2].questions];
+      const totalUsage = {
+        prompt_tokens: (results[0].usage?.prompt_tokens || 0) + (results[1].usage?.prompt_tokens || 0) + (results[2].usage?.prompt_tokens || 0),
+        completion_tokens: (results[0].usage?.completion_tokens || 0) + (results[1].usage?.completion_tokens || 0) + (results[2].usage?.completion_tokens || 0),
+        total_tokens: (results[0].usage?.total_tokens || 0) + (results[1].usage?.total_tokens || 0) + (results[2].usage?.total_tokens || 0)
+      };
 
       console.log(`[AI Service] Generated ${allQuestions.length} questions total.`);
 
       if (allQuestions.length < 5) throw new Error("Too few questions generated");
-      return allQuestions;
+      return { questions: allQuestions, usage: totalUsage };
 
     } catch (error) {
       console.error('Error in parallel generation:', error);
@@ -482,14 +552,15 @@ class AIService {
     `;
 
     try {
-      const text = await this.callAI(prompt, this.complexModel);
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const { content, usage } = await this.callAI(prompt, this.complexModel);
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) return { questions: parsed, usage };
       throw new Error("Empty or invalid questions returned");
     } catch (e) {
       console.error(`Error generating Round ${round}:`, e.message);
       // Return specific fallback questions for this round to ensure we meet the count
-      return this.getRoundFallback(round, count, position);
+      const fallback = this.getRoundFallback(round, count, position);
+      return { questions: fallback, usage: { total_tokens: 0 } };
     }
   }
 
@@ -544,20 +615,23 @@ class AIService {
 
   async safeGenerateQuestions(prompt, count, fallbackType) {
     try {
-      const text = await this.callAI(prompt);
-      const parsed = await this.parseJSONResponse(text);
+      const { content, usage } = await this.callAI(prompt);
+      const parsed = await this.parseJSONResponse(content);
       if (parsed && Array.isArray(parsed)) {
-        return parsed;
+        return { questions: parsed, usage };
       }
       throw new Error('Invalid JSON format');
     } catch (error) {
       console.error('Error generating questions:', error);
-      return Array(count).fill(0).map((_, i) => ({
-        question: `Fallback ${fallbackType} question ${i + 1}`,
-        type: fallbackType,
-        expectedTime: 120,
-        difficulty: "medium"
-      }));
+      return {
+        questions: Array(count).fill(0).map((_, i) => ({
+          question: `Fallback ${fallbackType} question ${i + 1}`,
+          type: fallbackType,
+          expectedTime: 120,
+          difficulty: "medium"
+        })),
+        usage: { total_tokens: 0 }
+      };
     }
   }
 
@@ -691,16 +765,16 @@ class AIService {
     `;
 
     try {
-      const text = await this.callAI(prompt);
-      console.log('Evaluation raw response:', text);
+      const { content, usage } = await this.callAI(prompt);
+      console.log('Evaluation raw response:', content);
 
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed) return parsed;
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed) return { evaluation: parsed, usage };
 
-      return this.getDefaultEvaluation();
+      return { evaluation: this.getDefaultEvaluation(), usage };
     } catch (error) {
       console.error('Error evaluating answer:', error);
-      return this.getDefaultEvaluation();
+      return { evaluation: this.getDefaultEvaluation(), usage: { total_tokens: 0 } };
     }
   }
 
@@ -711,6 +785,28 @@ class AIService {
       confidenceScore: 0.5,
       overallScore: 0.5,
       feedback: "Could not generate detailed evaluation due to AI service error."
+    };
+  }
+
+  getDefaultReport(candidateName, position) {
+    return {
+      summary: {
+        overallScore: 0,
+        technicalScore: 0,
+        communicationScore: 0,
+        decision: "Pending",
+        reason: "Could not generate report due to AI service unavailability."
+      },
+      detailedBreakdown: {
+        technicalSkills: { score: 0, feedback: "N/A" },
+        problemSolving: { score: 0, feedback: "N/A" },
+        communication: { score: 0, feedback: "N/A" },
+        confidence: { score: 0, feedback: "N/A" }
+      },
+      strengths: [],
+      weaknesses: ["Report generation failed"],
+      finalFeedback: `An error occurred while generating the final report for ${candidateName}. Please try again later.`,
+      suggestions: []
     };
   }
 
@@ -761,16 +857,16 @@ class AIService {
     `;
 
     try {
-      const text = await this.callAI(prompt, this.complexModel);
-      console.log('Final report raw response:', text);
+      const { content, usage } = await this.callAI(prompt, this.complexModel);
+      console.log('Final report raw response:', content);
 
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed) return parsed;
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed) return { report: parsed, usage };
 
-      return this.getDefaultReport(candidateName, position);
+      return { report: this.getDefaultReport(candidateName, position), usage };
     } catch (error) {
       console.error('Error generating final report:', error);
-      return this.getDefaultReport(candidateName, position);
+      return { report: this.getDefaultReport(candidateName, position), usage: { total_tokens: 0 } };
     }
   }
 
