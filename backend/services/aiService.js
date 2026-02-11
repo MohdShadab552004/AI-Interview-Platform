@@ -699,9 +699,54 @@ class AIService {
     }
   }
 
-  // Convert text to speech using Hugging Face (or Python fallback)
+  // Convert text to speech
   async textToSpeech(text) {
-    // 1. Try Hugging Face if configured
+    // 1. Try Google Translate TTS (Primary - Requested by User for Reliability)
+    try {
+      console.log('Attempting TTS via Google Translate...');
+
+      // Helper to split text into safe chunks (Google TTS limit ~200 chars)
+      const splitTextIntoChunks = (text, maxLength = 180) => {
+        const chunks = [];
+        let currentChunk = '';
+        const sentences = text.split(/([.?!]+)/); // Split by punctuation, keeping it
+
+        for (let i = 0; i < sentences.length; i++) {
+          const part = sentences[i];
+          if (currentChunk.length + part.length < maxLength) {
+            currentChunk += part;
+          } else {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            currentChunk = part;
+          }
+        }
+        if (currentChunk) chunks.push(currentChunk.trim());
+        return chunks.filter(c => c.length > 0);
+      };
+
+      const chunks = splitTextIntoChunks(text);
+      console.log(`Split text into ${chunks.length} chunks for TTS.`);
+
+      const audioBuffers = await Promise.all(chunks.map(async (chunk) => {
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=en&client=tw-ob`;
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          }
+        });
+        return Buffer.from(response.data);
+      }));
+
+      if (audioBuffers.length > 0) {
+        return Buffer.concat(audioBuffers);
+      }
+    } catch (googleError) {
+      console.error('Google Translate TTS failed:', googleError.message);
+      // Fallthrough to other methods
+    }
+
+    // 2. Try Hugging Face if configured
     if (this.aiProvider === 'huggingface' && this.hf) {
       console.log(`[AI Service] Generating TTS with Hugging Face (${this.hfTTSModel})...`);
       try {
@@ -720,7 +765,7 @@ class AIService {
       }
     }
 
-    // 2. Fallback to Python gTTS service
+    // 3. Fallback to Python gTTS service
     try {
       console.log('Generating TTS via Python service...');
       const response = await axios.post(`${env.PYTHON_SERVICE_URL}/tts`, {
@@ -733,27 +778,6 @@ class AIService {
       }
     } catch (pythonError) {
       console.error('Python TTS failed:', pythonError.message);
-
-      // 3. Fallback to Google Translate TTS (Unofficial)
-      try {
-        console.log('Attempting secondary fallback TTS (Google)...');
-        // Use a public Google Translate TTS endpoint (unofficial but often works for simple cases)
-        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text.substring(0, 100))}&tl=en&client=tw-ob`;
-
-        const fallbackResponse = await axios.get(url, {
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://translate.google.com/'
-          }
-        });
-
-        if (fallbackResponse.data) {
-          return Buffer.from(fallbackResponse.data);
-        }
-      } catch (googleError) {
-        console.error('Google Translate TTS failed:', googleError.message);
-      }
     }
 
     console.error('All TTS methods failed. Returning null.');

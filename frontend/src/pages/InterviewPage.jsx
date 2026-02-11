@@ -231,8 +231,70 @@ const InterviewPage = () => {
     setHintUsed(false);
   };
 
+  // Audio Recording Logic
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.start();
+      console.log('🎙️ Recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      toast.error("Could not access microphone.");
+    }
+  };
+
+  const stopRecording = () => {
+    return new Promise((resolve) => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          resolve(audioBlob);
+        };
+        mediaRecorderRef.current.stop();
+        console.log('⏹️ Recording stopped');
+      } else {
+        resolve(null);
+      }
+    });
+  };
+
+  // Manage Recording State based on AI Speaking status
+  useEffect(() => {
+    if (!isSetupComplete || !interview) return;
+
+    if (!isSpeaking) {
+      // AI finished speaking, start recording user answer
+      startRecording();
+    } else {
+      // AI is speaking, ensure recording is stopped (if any)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+    }
+  }, [isSpeaking, isSetupComplete, interview, currentQuestionIndex]);
+
   const submitAnswer = async () => {
     if (isSubmitting || !interview) return;
+
+    // Stop recording first to get the audio blob
+    const audioBlob = await stopRecording();
+
+    // Verify audio (unless it's a code/text answer)
+    if ((!audioBlob || audioBlob.size === 0) && editorMode === 'notepad' && !notepadContent && !codeContent) {
+      toast.error("No audio recorded. Please speak your answer.");
+      // Restart recording since we failed to submit
+      startRecording();
+      return;
+    }
 
     const currentQ = interview.questions[currentQuestionIndex];
 
@@ -254,16 +316,20 @@ const InterviewPage = () => {
 
       formData.append("hintUsed", hintUsed);
 
-      // Add empty audio blob to satisfy backend
-      const emptyBlob = new Blob([], { type: 'audio/webm' });
-      formData.append("audio", emptyBlob, "answer.webm");
+      // Attach actual recorded audio or empty fallback if code-only
+      if (audioBlob) {
+        formData.append("audio", audioBlob, "answer.webm");
+      } else {
+        const emptyBlob = new Blob([], { type: 'audio/webm' });
+        formData.append("audio", emptyBlob, "answer.webm");
+      }
 
       const response = await axios.post(
         `${API_BASE}/interview/submit-answer`,
         formData,
         {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 30000
+          timeout: 45000 // Increased timeout for audio upload
         }
       );
 
