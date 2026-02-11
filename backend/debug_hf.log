@@ -1,0 +1,14 @@
+[2026-02-10T20:39:05.768Z] Starting debug script...
+[2026-02-10T20:39:05.771Z] Token present: true
+[2026-02-10T20:39:05.772Z] Token length: 37
+[2026-02-10T20:39:05.772Z] Provider: huggingface
+[2026-02-10T20:39:05.772Z] Testing HF connection to mistralai/Mistral-7B-Instruct-v0.2...
+[2026-02-10T20:39:06.352Z] ERROR CAUGHT:
+[2026-02-10T20:39:06.353Z] Model mistralai/Mistral-7B-Instruct-v0.2 is not supported for task text-generation and provider together. Supported task: conversational.
+[2026-02-10T20:40:53.967Z] Starting debug script...
+[2026-02-10T20:40:53.970Z] Token present: true
+[2026-02-10T20:40:53.970Z] Token length: 37
+[2026-02-10T20:40:53.970Z] Provider: huggingface
+[2026-02-10T20:40:53.971Z] Testing HF connection to mistralai/Mistral-7B-Instruct-v0.2...
+[2026-02-10T20:40:55.003Z] Response received!
+[2026-02-10T20:40:55.003Z] {"id":"oWredqS-2j9zxn-9cbe6c9d3e79d6f3","object":"chat.completion","created":1770756054,"model":"mistralai/Mistral-7B-Instruct-v0.2","metadata":{"weight_version":"default"},"prompt":[],"choices":[{"index":0,"message":{"role":"assistant","content":"Hello! 😊 How can I assist you","tool_calls":[],"reasoning":null},"logprobs":null,"finish_reason":"length","seed":null}],"usage":{"prompt_tokens":544,"total_tokens":554,"completion_tokens":10}}

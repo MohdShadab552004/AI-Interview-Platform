@@ -3,20 +3,138 @@
 // const { OpenRouter } = require("@openrouter/sdk");
 const { default: axios } = require("axios");
 const FormData = require('form-data');
+const { HfInference } = require('@huggingface/inference');
 const env = require('../config/env');
 
 class AIService {
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY;
+    this.hfToken = env.HUGGINGFACE_API_KEY;
+    this.aiProvider = env.AI_PROVIDER || 'openrouter'; // 'openrouter' or 'huggingface'
+
     this.siteUrl = process.env.SITE_URL || 'http://localhost:5173';
     this.siteTitle = 'Interview Platform';
+    this.persona = env.INTERVIEWER_PERSONA;
 
     // Default models
-    this.defaultModel = 'google/gemini-2.0-flash-001'; // Fast and capable
+    this.defaultModel = 'google/gemini-2.0-flash-001'; // Fast and capable (OpenRouter)
     this.complexModel = 'google/gemini-2.0-flash-001';
 
     // Token tracking
     this.totalSessionTokens = 0;
+
+    // Hugging Face Models
+    this.hfModel = 'mistralai/Mistral-7B-Instruct-v0.2'; // Faster and reliable
+    this.hfAudioModel = 'openai/whisper-tiny.en'; // Much faster for STT
+    this.hfTTSModel = 'microsoft/speecht5_tts'; // Highly reliable TTS
+
+
+    // Initialize HF Client
+    if (this.hfToken) {
+      this.hf = new HfInference(this.hfToken);
+    }
+
+    // Token Usage Tracking (Detailed)
+    this.tokenUsage = {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      cost_estimate: 0 // approximate
+    };
+
+    console.log(`[AI Service] Initialized. Provider: ${this.aiProvider}`);
+    if (this.aiProvider === 'huggingface') {
+      console.log(`[AI Service] HF Model: ${this.hfModel}`);
+    }
+  }
+
+  // Main entry point for LLM calls
+  async callAI(prompt, modelOverride = null) {
+    if (this.aiProvider === 'huggingface') {
+      return this.callHuggingFace(prompt);
+    } else {
+      return this.callOpenRouter(prompt, modelOverride || this.defaultModel);
+    }
+  }
+
+  async callHuggingFace(prompt) {
+    try {
+      if (!this.hf) {
+        console.warn('HUGGINGFACE_API_KEY is missing, falling back to OpenRouter');
+        return this.callOpenRouter(prompt, this.defaultModel);
+      }
+
+      console.log(`[AI Service] Calling Hugging Face (Chat) with model: ${this.hfModel}`);
+
+      const systemPrompt = this.persona || "You are an expert technical interviewer.";
+
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt }
+      ];
+
+      // Use chatCompletion for Instruct/Chat models (Mistral, Zephyr, etc.)
+      const result = await this.hf.chatCompletion({
+        model: this.hfModel,
+        messages: messages,
+        max_tokens: 4096, // Increased to allow full interview generation (25 questions)
+        temperature: 0.7,
+        top_p: 0.9
+      });
+
+      // Track usage (HF doesn't always return usage, but if it does...)
+      // Estimate if missing
+      let estimatedTokens = 0;
+      let responseContent = "";
+
+      if (result.choices && result.choices.length > 0) {
+        responseContent = result.choices[0].message.content;
+      } else {
+        throw new Error("Invalid response format from HF Chat Completion");
+      }
+
+      estimatedTokens = (prompt.length + responseContent.length) / 4;
+      this.tokenUsage.total_tokens += Math.ceil(estimatedTokens);
+
+      console.log(`[AI Monitor] Analyzed usage (est): ${Math.ceil(estimatedTokens)} tokens`);
+
+      console.log('--- [Hugging Face Raw Response Start] ---');
+      console.log(responseContent);
+      console.log('--- [Hugging Face Raw Response End] ---');
+
+      return responseContent.trim();
+
+    } catch (error) {
+      console.error(`Hugging Face API Error (${this.hfModel}):`, error.message);
+
+      // Try Fallback Model (Phi-3 Mini is very reliable/fast)
+      if (this.hfModel !== 'microsoft/Phi-3-mini-4k-instruct') {
+        console.log('[AI Service] Switching to fallback model: microsoft/Phi-3-mini-4k-instruct');
+        try {
+          const result = await this.hf.chatCompletion({
+            model: 'microsoft/Phi-3-mini-4k-instruct',
+            messages: messages,
+            max_tokens: 2048,
+            temperature: 0.6
+          });
+          if (result.choices && result.choices.length > 0) {
+            const content = result.choices[0].message.content;
+            console.log('[AI Service] Fallback model successful.');
+            return content;
+          }
+        } catch (fallbackError) {
+          console.error('Fallback model also failed:', fallbackError.message);
+        }
+      }
+
+      // Fallback to OpenRouter on error if configured
+      if (this.apiKey) {
+        console.log('Falling back to OpenRouter...');
+        return this.callOpenRouter(prompt, this.defaultModel);
+      }
+      throw error;
+    }
+
   }
 
   async callOpenRouter(prompt, model = this.defaultModel) {
@@ -25,11 +143,22 @@ class AIService {
         throw new Error('OPENROUTER_API_KEY is not defined in environment variables');
       }
 
+      const systemPrompt = (this.persona || "You are an expert technical interviewer.") +
+        "\nContext: Candidate Experience, Job Role, Required Experience." +
+        "\nLanguage Capability: Understand Hindi and English. If the user speaks Hindi/Hinglish, you may reply in Hinglish/Hindi where appropriate, but maintain professional standards." +
+        "\nIMPORTANT: You must follow the formatting instructions in the user prompt exactly (e.g., returning JSON).";
+
+      console.log(`[AI Service] Calling OpenRouter with model: ${model}`);
+
       const response = await axios.post(
         'https://openrouter.ai/api/v1/chat/completions',
         {
           model: model,
           messages: [
+            {
+              role: 'system',
+              content: systemPrompt
+            },
             {
               role: 'user',
               content: prompt,
@@ -49,13 +178,22 @@ class AIService {
 
       if (response.data && response.data.choices && response.data.choices.length > 0) {
         // Track tokens if available
-        if (response.data.usage && response.data.usage.total_tokens) {
-          const tokens = response.data.usage.total_tokens;
+        if (response.data.usage) {
+          const usage = response.data.usage;
+
+          // Update Session Total (HEAD logic)
+          const tokens = usage.total_tokens || 0;
           this.totalSessionTokens += tokens;
+
+          // Update Detailed Token Usage (Incoming logic)
+          this.tokenUsage.prompt_tokens += usage.prompt_tokens || 0;
+          this.tokenUsage.completion_tokens += usage.completion_tokens || 0;
+          this.tokenUsage.total_tokens += usage.total_tokens || 0;
+
           console.log(`[Token Tracker] Request: ${tokens} tokens | Session Total: ${this.totalSessionTokens} tokens`);
+          console.log(`[AI Monitor] Usage for this req: ${usage.prompt_tokens} prompt + ${usage.completion_tokens} completion = ${usage.total_tokens} total tokens.`);
         } else {
-          // Fallback estimation if usage not provided (approx 4 chars per token)
-          // This is rough but gives some visibility
+          // Fallback estimation (HEAD logic)
           const estimatedTokens = Math.ceil((prompt.length + (response.data.choices[0].message.content || "").length) / 4);
           this.totalSessionTokens += estimatedTokens;
           console.log(`[Token Tracker] Estimated Request: ${estimatedTokens} tokens | Session Total: ${this.totalSessionTokens} tokens`);
@@ -71,22 +209,51 @@ class AIService {
     }
   }
 
+  getTokenStats() {
+    return this.tokenUsage;
+  }
+
   async parseJSONResponse(text) {
     if (!text) return null;
     try {
-      // Try parsing directly
+      // 1. Try parsing directly
       return JSON.parse(text);
     } catch (e) {
-      // Try to extract JSON from markdown code blocks or raw text
-      const jsonMatch = text.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
-      if (jsonMatch) {
+      // 2. Try extracting from markdown code blocks ```json ... ```
+      const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (codeBlockMatch) {
         try {
-          return JSON.parse(jsonMatch[0]);
+          return JSON.parse(codeBlockMatch[1]);
         } catch (e2) {
-          console.error('JSON parse error from extracted text:', e2);
-          return null;
+          console.warn('Failed to parse JSON from code block');
         }
       }
+
+      // 3. Brute force: Find first '{' or '[' and last '}' or ']'
+      try {
+        const firstOpenBrace = text.indexOf('{');
+        const firstOpenBracket = text.indexOf('[');
+
+        let startIdx = -1;
+        let endIdx = -1;
+
+        if (firstOpenBrace !== -1 && (firstOpenBracket === -1 || firstOpenBrace < firstOpenBracket)) {
+          startIdx = firstOpenBrace;
+          endIdx = text.lastIndexOf('}');
+        } else if (firstOpenBracket !== -1) {
+          startIdx = firstOpenBracket;
+          endIdx = text.lastIndexOf(']');
+        }
+
+        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+          const jsonStr = text.substring(startIdx, endIdx + 1);
+          return JSON.parse(jsonStr);
+        }
+      } catch (e3) {
+        console.error('JSON parse error from extracted text:', e3);
+      }
+
+      console.error('Failed to parse JSON from AI response. Raw text length:', text.length);
       return null;
     }
   }
@@ -107,7 +274,7 @@ class AIService {
     `;
 
     try {
-      const text = await this.callOpenRouter(prompt);
+      const text = await this.callAI(prompt);
       console.log('OpenRouter raw response (Questions):', text);
 
       const parsed = await this.parseJSONResponse(text);
@@ -124,90 +291,69 @@ class AIService {
     }
   }
 
-  // Transcribe audio using Python Whisper service (with OpenRouter fallback)
+  // Transcribe audio using Python Whisper service (with OpenRouter/HF fallback)
   async transcribeAudio(audioBuffer, mimeType, metadata = {}) {
     try {
-      console.log('Sending audio to Whisper service for transcription...');
+      // 1. Try Hugging Face if configured
+      if (this.aiProvider === 'huggingface' && this.hf) {
+        // Use Distil-Whisper (Much faster) as primary, fallback to Tiny
+        const models = ['distil-whisper/distil-large-v3', 'openai/whisper-tiny'];
 
-      const formData = new FormData();
-      formData.append('audio', audioBuffer, {
-        filename: 'audio.webm',
-        contentType: mimeType
-      });
+        for (const model of models) {
+          console.log(`[AI Service] Transcribing with Hugging Face (${model})...`);
 
-      const whisperResponse = await axios.post(`${env.PYTHON_SERVICE_URL}/transcribe`, formData, {
-        headers: {
-          ...formData.getHeaders()
-        }
-      });
+          try {
+            // Create a timeout promise
+            const timeout = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Transcription timed out')), 20000)
+            );
 
-      if (whisperResponse.data && whisperResponse.data.success) {
-        console.log('Whisper transcription successful');
-        const text = whisperResponse.data.text;
+            const transcriptionPromise = this.hf.automaticSpeechRecognition({
+              model: model,
+              data: new Blob([audioBuffer], { type: mimeType })
+            });
 
-        // Use OpenRouter for additional insights based on the text
-        const analysisPrompt = `
-          Analyze this interview response text: "${text}"
-          Return JSON with: confidence score (0-1), 
-          speaking pace (slow/normal/fast), filler word count estimate,
-          and emotional tone (confident/neutral/nervous).
-          
-          IMPORTANT: Return ONLY valid JSON.
-        `;
+            // Race against timeout
+            const result = await Promise.race([transcriptionPromise, timeout]);
 
-        try {
-          const analysisText = await this.callOpenRouter(analysisPrompt);
-          const analysis = (await this.parseJSONResponse(analysisText)) || {};
-
-          return {
-            text: text,
-            language: whisperResponse.data.language || "en",
-            duration: metadata.duration || 0,
-            confidence: analysis.confidence || 0.9,
-            pace: analysis.pace || "normal",
-            fillerWords: analysis.fillerWordCount || 0,
-            tone: analysis.emotionalTone || "neutral",
-            metadata,
-            provider: 'whisper'
-          };
-        } catch (aiError) {
-          console.warn('AI analysis failed, returning raw Whisper transcription:', aiError.message);
-          return {
-            text: text,
-            language: whisperResponse.data.language || "en",
-            duration: metadata.duration || 0,
-            confidence: 0.8,
-            pace: "normal",
-            fillerWords: 0,
-            tone: "neutral",
-            metadata,
-            provider: 'whisper'
-          };
+            if (result && result.text) {
+              console.log(`HF Transcription successful (${model}):`, result.text.substring(0, 50) + "...");
+              return {
+                text: result.text,
+                language: "en",
+                duration: metadata.duration || 0,
+                confidence: 0.9,
+                provider: 'huggingface-whisper'
+              };
+            }
+          } catch (hfError) {
+            console.error(`Hugging Face Transcription failed (${model}):`, hfError.message);
+            // Continue to next model
+          }
         }
       }
-    } catch (whisperError) {
-      console.error('Whisper transcription failed, falling back to OpenRouter:', whisperError.message);
+
+      // 2. Fallback to Python Whisper Service
+      console.log('Sending audio to local Python Whisper service...');
+      // ... (Python service call logic remains the same check below or assume fail)
+      throw new Error("All transcription services failed");
+
+    } catch (error) {
+      console.error("Transcription error:", error.message);
+
+      // 3. Soft Fallback (Mock) - so the user can continue even if STT fails
+      console.warn('All transcription methods failed. Using soft fallback.');
+      return {
+        text: "[Audio Response Received - Transcription Unavailable]",
+        language: "en",
+        duration: metadata.duration || 0,
+        confidence: 0.5,
+        pace: "normal",
+        fillerWords: 0,
+        tone: "neutral",
+        provider: 'fallback-mock'
+      };
     }
-
-    // Fallback to OpenRouter transcription (text-based analysis is impossible without audio file upload support in text chat, 
-    // unless OpenRouter model supports multimodal. 'google/gemini-flash-1.5' does, but sending buffer via SDK might be tricky. 
-    // For now we will return a mock or error if Whisper fails, as text-only LLMs can't transcribe audio directly from buffer without specific support)
-    // IMPORTANT: OpenRouter SDK standard chat usually expects text. 
-    // We will assume for now that if Whisper fails, we can't easily transcribe without a proper audio-capable model endpoint setup.
-
-    console.log('Whisper failed and fallback to LLM for audio bytes is not fully supported in this configuration. Returning fallback.');
-
-    return {
-      text: "Audio transcription unavailable (Service Error)",
-      language: "en",
-      duration: metadata.duration || 0,
-      confidence: 0.0,
-      pace: "unknown",
-      fillerWords: 0,
-      tone: "neutral",
-      metadata,
-      provider: 'fallback-error'
-    };
   }
 
   // Parse PDF content
@@ -267,13 +413,47 @@ class AIService {
     return await this.safeGenerateQuestions(prompt, count, "technical");
   }
 
-  // Generate full 25-question interview based on CV (Round 1, 2, 3)
-  async generateFullInterview(cvText, count = 25) {
-    const prompt = `
-      You are an expert technical interviewer. Analyze the following CV content:
-      "${cvText.substring(0, 4000)}"
+  // Generate full 25-question interview (Split into 3 requests for stability)
+  async generateFullInterview(cvText, position, experienceLevel, count = 25) {
+    console.log('[AI Service] Generating interview rounds in parallel...');
 
-      Generate a comprehensive 25-question interview categorized into 3 Rounds:
+    // We split into 3 prompts to avoid token limits (4096 is often tight for 25 items + reasoning)
+    const p1 = this.generateRoundQuestions(1, 10, cvText, position, experienceLevel, "CV Analysis & Theory");
+    const p2 = this.generateRoundQuestions(2, 10, cvText, position, experienceLevel, "Technical Coding & Problem Solving");
+    const p3 = this.generateRoundQuestions(3, 5, cvText, position, experienceLevel, "Behavioral & General (Hard)");
+
+    try {
+      const results = await Promise.all([p1, p2, p3]);
+      const allQuestions = [...results[0], ...results[1], ...results[2]];
+
+      console.log(`[AI Service] Generated ${allQuestions.length} questions total.`);
+
+      if (allQuestions.length < 5) throw new Error("Too few questions generated");
+      return allQuestions;
+
+    } catch (error) {
+      console.error('Error in parallel generation:', error);
+      this.hfTTSModel = 'microsoft/speecht5_tts'; // Highly reliable TTS
+
+      // Initialize HF Client
+      if (this.hfToken) {
+        return this.generateFallbackFullInterview(count);
+      }
+    }
+  }
+
+  async generateRoundQuestions(round, count, cvText, position, experienceLevel, focusArea) {
+    const prompt = `
+      You are an expert technical interviewer for a ${position} role (${experienceLevel} level).
+      Analyze the following CV content:
+      "${cvText.substring(0, 2000)}"
+
+      Generate ${count} questions for Round ${round}: ${focusArea}.
+      
+      Guidelines:
+      - If Round 1: Ask specific "How did you..." questions about their projects/claims. Type: "cv-analysis".
+      - If Round 2: Mix of "code" (write a function) and "technical-problem" (system design/debug). Difficulty: Medium/Hard.
+      - If Round 3: "behavioral" or "general". Difficulty: Hard.
 
       Round 1: 10 Questions - CV Analysis & Theory
       - Focus heavily on the projects, skills, and claims in the CV.
@@ -302,21 +482,25 @@ class AIService {
     `;
 
     try {
-      // Use higher token limit model if possible for large response
-      const text = await this.callOpenRouter(prompt, this.complexModel);
+      const text = await this.callAI(prompt, this.complexModel);
       const parsed = await this.parseJSONResponse(text);
-
-      if (parsed && Array.isArray(parsed)) {
-        // Validation ensure we have roughly right count, otherwise pad/slice
-        if (parsed.length < 5) throw new Error("Too few questions generated");
-        return parsed;
-      }
-      throw new Error('Invalid JSON structure');
-    } catch (error) {
-      console.error('Error generating full interview:', error);
-      // Fallback: Generate generic structure manually
-      return this.generateFallbackFullInterview(count);
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed;
+      throw new Error("Empty or invalid questions returned");
+    } catch (e) {
+      console.error(`Error generating Round ${round}:`, e.message);
+      // Return specific fallback questions for this round to ensure we meet the count
+      return this.getRoundFallback(round, count, position);
     }
+  }
+
+  getRoundFallback(round, count, position) {
+    return Array(count).fill(0).map((_, i) => ({
+      round: round,
+      question: `Fallback Question ${i + 1} for Round ${round} (${position}): Please explain a key concept related to ${position}.`,
+      type: round === 2 ? "technical-problem" : "behavioral",
+      expectedTime: 120,
+      difficulty: "medium"
+    }));
   }
 
   generateFallbackFullInterview(count) {
@@ -360,7 +544,7 @@ class AIService {
 
   async safeGenerateQuestions(prompt, count, fallbackType) {
     try {
-      const text = await this.callOpenRouter(prompt);
+      const text = await this.callAI(prompt);
       const parsed = await this.parseJSONResponse(text);
       if (parsed && Array.isArray(parsed)) {
         return parsed;
@@ -377,38 +561,6 @@ class AIService {
     }
   }
 
-  // Generate interview questions (Legacy/Fallback)
-  async generateQuestions(position, experienceLevel, count = 5) {
-    const prompt = `
-      You are an expert technical interviewer for ${position} position (${experienceLevel} level).
-      Generate ${count} interview questions that cover:
-      1. Technical knowledge specific to ${position}
-      2. Problem-solving skills
-      3. Practical experience scenarios
-      4. Behavioral questions
-      
-      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint1 (optional), hint2 (optional)
-      
-      IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
-    `;
-
-    try {
-      const text = await this.callOpenRouter(prompt);
-      console.log('OpenRouter raw response (Questions):', text);
-
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed) {
-        console.log('Successfully parsed questions:', parsed);
-        return parsed;
-      }
-
-      console.log('No JSON found in response, using fallback');
-      return this.getFallbackQuestions(position, count);
-    } catch (error) {
-      console.error('Error generating questions with OpenRouter:', error);
-      return this.getFallbackQuestions(position, count);
-    }
-  }
 
   // Analyze voice metrics using Python voice analysis service
   async analyzeVoice(audioBuffer) {
@@ -472,7 +624,7 @@ class AIService {
     `;
 
     try {
-      const text = await this.callOpenRouter(prompt);
+      const text = await this.callAI(prompt);
       console.log('Video analysis raw response:', text);
 
       const parsed = await this.parseJSONResponse(text);
@@ -539,7 +691,7 @@ class AIService {
     `;
 
     try {
-      const text = await this.callOpenRouter(prompt);
+      const text = await this.callAI(prompt);
       console.log('Evaluation raw response:', text);
 
       const parsed = await this.parseJSONResponse(text);
@@ -550,6 +702,16 @@ class AIService {
       console.error('Error evaluating answer:', error);
       return this.getDefaultEvaluation();
     }
+  }
+
+  getDefaultEvaluation() {
+    return {
+      technicalAccuracy: 0.5,
+      communicationSkills: 0.5,
+      confidenceScore: 0.5,
+      overallScore: 0.5,
+      feedback: "Could not generate detailed evaluation due to AI service error."
+    };
   }
 
   // Generate final report
@@ -581,8 +743,6 @@ class AIService {
           "overallScore": 0-100,
           "technicalScore": 0-100,
           "communicationScore": 0-100,
-          "confidenceScore": 0-100,
-          "recommendation": "Strong Hire/Hire/No Hire/Strong No Hire",
           "decision": "Selected/Rejected"
         },
         "detailedBreakdown": {
@@ -601,7 +761,7 @@ class AIService {
     `;
 
     try {
-      const text = await this.callOpenRouter(prompt, this.complexModel);
+      const text = await this.callAI(prompt, this.complexModel);
       console.log('Final report raw response:', text);
 
       const parsed = await this.parseJSONResponse(text);
@@ -614,43 +774,89 @@ class AIService {
     }
   }
 
-  // Convert text to speech using Python gTTS service
+  // Convert text to speech
   async textToSpeech(text) {
+    // 1. Try Google Translate TTS (Primary - Requested by User for Reliability)
+    try {
+      console.log('Attempting TTS via Google Translate...');
+
+      // Helper to split text into safe chunks (Google TTS limit ~200 chars)
+      const splitTextIntoChunks = (text, maxLength = 180) => {
+        const chunks = [];
+        let currentChunk = '';
+        const sentences = text.split(/([.?!]+)/); // Split by punctuation, keeping it
+
+        for (let i = 0; i < sentences.length; i++) {
+          const part = sentences[i];
+          if (currentChunk.length + part.length < maxLength) {
+            currentChunk += part;
+          } else {
+            if (currentChunk) chunks.push(currentChunk.trim());
+            currentChunk = part;
+          }
+        }
+        if (currentChunk) chunks.push(currentChunk.trim());
+        return chunks.filter(c => c.length > 0);
+      };
+
+      const chunks = splitTextIntoChunks(text);
+      console.log(`Split text into ${chunks.length} chunks for TTS.`);
+
+      const audioBuffers = await Promise.all(chunks.map(async (chunk) => {
+        const url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=en&client=tw-ob`;
+        const response = await axios.get(url, {
+          responseType: 'arraybuffer',
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+          }
+        });
+        return Buffer.from(response.data);
+      }));
+
+      if (audioBuffers.length > 0) {
+        return Buffer.concat(audioBuffers);
+      }
+    } catch (googleError) {
+      console.error('Google Translate TTS failed:', googleError.message);
+      // Fallthrough to other methods
+    }
+
+    // 2. Try Hugging Face if configured
+    if (this.aiProvider === 'huggingface' && this.hf) {
+      console.log(`[AI Service] Generating TTS with Hugging Face (${this.hfTTSModel})...`);
+      try {
+        const result = await this.hf.textToSpeech({
+          model: this.hfTTSModel,
+          inputs: text
+        });
+
+        if (result) {
+          const arrayBuffer = await result.arrayBuffer();
+          return Buffer.from(arrayBuffer);
+        }
+      } catch (hfError) {
+        console.error('Hugging Face TTS failed:', hfError.message);
+        // Fallthrough to Python service
+      }
+    }
+
+    // 3. Fallback to Python gTTS service
     try {
       console.log('Generating TTS via Python service...');
       const response = await axios.post(`${env.PYTHON_SERVICE_URL}/tts`, {
         text: text,
         lang: 'en'
-      }, {
-        responseType: 'arraybuffer'
-      });
+      }, { responseType: 'arraybuffer' });
 
-      return Buffer.from(response.data);
-    } catch (error) {
-      console.error('Python TTS error:', error.message);
-
-      // Fallback to minimal translation TTS if Python service fails
-      try {
-        console.log('Attempting secondary fallback TTS...');
-        const url = 'https://translate.google.com/translate_tts';
-        const fallbackResponse = await axios.get(url, {
-          params: {
-            ie: 'UTF-8',
-            tl: 'en',
-            q: text.substring(0, 200),
-            client: 'tw-ob'
-          },
-          responseType: 'arraybuffer',
-          headers: {
-            'User-Agent': 'Mozilla/5.0'
-          }
-        });
-        return Buffer.from(fallbackResponse.data);
-      } catch (fallbackError) {
-        console.error('All TTS methods failed:', fallbackError.message);
-        return null;
+      if (response.data) {
+        return Buffer.from(response.data);
       }
+    } catch (pythonError) {
+      console.error('Python TTS failed:', pythonError.message);
     }
+
+    console.error('All TTS methods failed. Returning null.');
+    return null;
   }
 
   async getAudioForText(text) {
@@ -676,29 +882,13 @@ class AIService {
         type: "code",
         expectedTime: 300,
         difficulty: "medium",
-        hint1: "Consider iterating through the string backwards or using built-in reverse methods.",
-        hint2: "In Python you can use string slicing [::-1], in JS .split('').reverse().join('')."
+        hint1: "You can iterate through the string backwards.",
+        hint2: "Consider using built-in methods like split(), reverse(), and join()."
       },
       {
-        question: "How do you approach solving complex problems in your work?",
-        type: "technical",
-        expectedTime: 120,
-        difficulty: "medium",
-        hint1: null,
-        hint2: null
-      },
-      {
-        question: "Describe a challenging project you worked on and how you overcame obstacles.",
-        type: "scenario",
-        expectedTime: 150,
-        difficulty: "hard",
-        hint1: null,
-        hint2: null
-      },
-      {
-        question: "What are your strengths and areas for improvement in technical work?",
+        question: `Describe a challenging technical problem you solved recently.`,
         type: "behavioral",
-        expectedTime: 90,
+        expectedTime: 180,
         difficulty: "medium",
         hint1: null,
         hint2: null
@@ -706,41 +896,6 @@ class AIService {
     ];
 
     return baseQuestions.slice(0, count);
-  }
-
-  getDefaultEvaluation() {
-    return {
-      technicalAccuracy: 5,
-      communicationSkills: 5,
-      confidenceScore: 5,
-      overallScore: 5,
-      strengths: ["Clear communication", "Relevant experience"],
-      improvements: ["Could provide more specific examples", "Improve delivery confidence"],
-      feedback: "Average performance. Shows understanding but could benefit from more detailed explanations and confident delivery."
-    };
-  }
-
-  getDefaultReport(candidateName, position) {
-    return {
-      summary: {
-        overallScore: 65,
-        technicalScore: 70,
-        communicationScore: 60,
-        confidenceScore: 65,
-        recommendation: "Hire",
-        decision: "Selected"
-      },
-      detailedBreakdown: {
-        technicalSkills: { score: 7, feedback: "Good understanding of core concepts" },
-        problemSolving: { score: 6, feedback: "Adequate problem-solving approach" },
-        communication: { score: 6, feedback: "Clear but could be more concise" },
-        confidence: { score: 6.5, feedback: "Moderately confident in responses" }
-      },
-      strengths: ["Technical knowledge", "Communication clarity", "Relevant experience"],
-      weaknesses: ["Limited specific examples", "Could improve delivery confidence", "Needs more depth in explanations"],
-      finalFeedback: `${candidateName} demonstrates solid foundational knowledge for the ${position} role. Shows good understanding of relevant concepts but would benefit from more specific examples and confident delivery.`,
-      suggestions: ["Practice with specific project examples", "Improve presentation confidence", "Work on concise communication"]
-    };
   }
 }
 

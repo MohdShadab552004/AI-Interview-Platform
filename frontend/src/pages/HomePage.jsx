@@ -177,6 +177,53 @@ const HomePage = () => {
 
           <form onSubmit={startInterview} className="interview-form">
             <div className="form-group">
+              <label htmlFor="candidateName">Full Name</label>
+              <input
+                type="text"
+                id="candidateName"
+                name="candidateName"
+                value={formData.candidateName}
+                onChange={handleInputChange}
+                required
+                disabled={loading}
+              />
+            </div>
+
+            <div className="form-row">
+              <div className="form-group">
+                <label htmlFor="position">Job Role</label>
+                <input
+                  type="text"
+                  id="position"
+                  name="position"
+                  value={formData.position}
+                  onChange={handleInputChange}
+                  placeholder="e.g. Senior Backend Engineer"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="experienceLevel">Experience Level</label>
+                <select
+                  id="experienceLevel"
+                  name="experienceLevel"
+                  value={formData.experienceLevel}
+                  onChange={handleInputChange}
+                  required
+                  disabled={loading}
+                >
+                  <option value="Intern">Intern (0-1 years)</option>
+                  <option value="Junior">Junior (1-3 years)</option>
+                  <option value="Mid-level">Mid-level (3-5 years)</option>
+                  <option value="Senior">Senior (5-8 years)</option>
+                  <option value="Lead">Lead (8+ years)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
               <label>Resume / CV (Required)</label>
               <div className="file-upload-wrapper">
                 <FiUpload size={32} style={{ marginBottom: '1rem', color: 'var(--color-primary)' }} />

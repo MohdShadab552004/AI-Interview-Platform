@@ -263,6 +263,22 @@ section {
   font-size: 0.95rem;
 }
 
+.form-row {
+  display: flex;
+  gap: 1rem;
+}
+
+.form-row .form-group {
+  flex: 1;
+}
+
+@media (max-width: 600px) {
+  .form-row {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
 .file-upload-wrapper {
   background: rgba(0, 0, 0, 0.2);
   border: 2px dashed var(--color-border);

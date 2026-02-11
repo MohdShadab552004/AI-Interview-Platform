@@ -13,7 +13,7 @@ import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-python';
 import 'prismjs/components/prism-java';
 import 'prismjs/themes/prism-tomorrow.css';
-import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck, FiFileText, FiCode } from 'react-icons/fi';
+import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck, FiFileText, FiCode, FiVolume2, FiVolumeX } from 'react-icons/fi';
 
 const InterviewPage = () => {
   const { sessionId } = useParams();
@@ -45,12 +45,118 @@ const InterviewPage = () => {
   const [hintsRevealed, setHintsRevealed] = useState(0); // 0, 1, or 2
   const [hintConfirmLevel, setHintConfirmLevel] = useState(0); // 1 or 2
   const [hintsUsedCount, setHintsUsedCount] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [hintVisible, setHintVisible] = useState(false); // Kept if needed by incoming logic, though hintsRevealed likely supersedes it
+  const [hintUsed, setHintUsed] = useState(false);
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
+  // Audio Playback Effect
   useEffect(() => {
-    interviewRef.current = interview;
-  }, [interview]);
+    if (!interview || !isSetupComplete) return;
+
+    let audio = null;
+
+    const playQuestionAudio = async () => {
+      setIsSpeaking(true);
+      // Stop any previous audio
+      if (activeAudioRef.current) {
+        activeAudioRef.current.pause();
+        activeAudioRef.current = null;
+      }
+      // Stop browser TTS if any
+      window.speechSynthesis.cancel();
+
+      try {
+        const audioUrl = `${API_BASE}/interview/${sessionId}/question/${currentQuestionIndex}/audio`;
+
+        audio = new Audio(audioUrl);
+        activeAudioRef.current = audio;
+
+        // Safety timeout to prevent getting stuck in "AI Speaking" mode
+        const safetyTimeout = setTimeout(() => {
+          if (activeAudioRef.current === audio) {
+            console.warn("Audio playback timed out, forcing state change");
+            setIsSpeaking(false);
+            toast.info("Audio timed out. Please provide your answer now.");
+          }
+        }, 40000); // 40 seconds max for any question
+
+        audio.onended = () => {
+          clearTimeout(safetyTimeout);
+          setIsSpeaking(false);
+          activeAudioRef.current = null;
+          toast.success("🎤 Now it's your turn to speak!");
+        };
+
+        audio.onerror = (err) => {
+          clearTimeout(safetyTimeout);
+          console.warn("Backend audio failed, falling back to Browser TTS:", err);
+
+          // Fallback to Browser Speech Synthesis
+          const questionText = interview.questions[currentQuestionIndex]?.text;
+          if (questionText) {
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(questionText);
+            utterance.lang = 'en-US';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+
+            utterance.onend = () => {
+              setIsSpeaking(false);
+              toast.success("🎤 Now it's your turn to speak!");
+            };
+            utterance.onerror = (e) => {
+              console.error("Browser TTS failed:", e);
+              setIsSpeaking(false);
+              if (e.error === 'not-allowed') {
+                toast.error("Click 'Start' or interact with the page to enable audio.");
+              } else {
+                toast.error("Audio playback failed. Please read the question and answer.");
+              }
+            };
+
+            // Ensure voices are loaded (sometimes needed for Chrome)
+            if (window.speechSynthesis.getVoices().length === 0) {
+              window.speechSynthesis.onvoiceschanged = () => {
+                window.speechSynthesis.speak(utterance);
+              };
+            } else {
+              window.speechSynthesis.speak(utterance);
+            }
+          } else {
+            setIsSpeaking(false);
+            toast.info("Please read the question and provide your answer.");
+          }
+        };
+
+        // Wrap play in a user-interaction friendly way
+        try {
+          await audio.play();
+        } catch (playError) {
+          console.warn("Autoplay or format error:", playError);
+          // Trigger onerror manually to fall back
+          if (audio.onerror) audio.onerror(playError);
+        }
+
+      } catch (error) {
+        console.error("General audio setup error:", error);
+        setIsSpeaking(false);
+      }
+    };
+
+    playQuestionAudio();
+
+    return () => {
+      if (audio) {
+        audio.pause();
+        activeAudioRef.current = null;
+      }
+      window.speechSynthesis.cancel();
+    };
+  }, [currentQuestionIndex, interview, isSetupComplete, sessionId]);
 
   // Timer countdown
   useEffect(() => {
@@ -129,8 +235,70 @@ const InterviewPage = () => {
     setHintConfirmLevel(0);
   };
 
+  // Audio Recording Logic
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current.start();
+      console.log('🎙️ Recording started');
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      toast.error("Could not access microphone.");
+    }
+  };
+
+  const stopRecording = () => {
+    return new Promise((resolve) => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          resolve(audioBlob);
+        };
+        mediaRecorderRef.current.stop();
+        console.log('⏹️ Recording stopped');
+      } else {
+        resolve(null);
+      }
+    });
+  };
+
+  // Manage Recording State based on AI Speaking status
+  useEffect(() => {
+    if (!isSetupComplete || !interview) return;
+
+    if (!isSpeaking) {
+      // AI finished speaking, start recording user answer
+      startRecording();
+    } else {
+      // AI is speaking, ensure recording is stopped (if any)
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+    }
+  }, [isSpeaking, isSetupComplete, interview, currentQuestionIndex]);
+
   const submitAnswer = async () => {
     if (isSubmitting || !interview) return;
+
+    // Stop recording first to get the audio blob
+    const audioBlob = await stopRecording();
+
+    // Verify audio (unless it's a code/text answer)
+    if ((!audioBlob || audioBlob.size === 0) && editorMode === 'notepad' && !notepadContent && !codeContent) {
+      toast.error("No audio recorded. Please speak your answer.");
+      // Restart recording since we failed to submit
+      startRecording();
+      return;
+    }
 
     const currentQ = interview.questions[currentQuestionIndex];
 
@@ -152,16 +320,20 @@ const InterviewPage = () => {
 
       formData.append("hintsUsed", hintsUsedCount);
 
-      // Add empty audio blob to satisfy backend
-      const emptyBlob = new Blob([], { type: 'audio/webm' });
-      formData.append("audio", emptyBlob, "answer.webm");
+      // Attach actual recorded audio or empty fallback if code-only
+      if (audioBlob) {
+        formData.append("audio", audioBlob, "answer.webm");
+      } else {
+        const emptyBlob = new Blob([], { type: 'audio/webm' });
+        formData.append("audio", emptyBlob, "answer.webm");
+      }
 
       const response = await axios.post(
         `${API_BASE}/interview/submit-answer`,
         formData,
         {
           headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 30000
+          timeout: 45000 // Increased timeout for audio upload
         }
       );
 
@@ -404,6 +576,32 @@ const InterviewPage = () => {
                 <div className="question-badges">
                   <span className="question-type">{currentQuestion?.type || 'general'}</span>
                   <span className="question-difficulty">{currentQuestion?.difficulty || 'medium'}</span>
+
+                  {/* Speak Now Indicator */}
+                  <div className={`speaking-indicator ${isSpeaking ? 'speaking' : 'listening'}`} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '4px 12px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
+                    background: isSpeaking ? '#3b82f6' : '#10b981',
+                    color: 'white',
+                    marginLeft: '8px',
+                    transition: 'all 0.3s ease',
+                    opacity: 0.9
+                  }}>
+                    {isSpeaking ? (
+                      <>
+                        <FiVolume2 className="pulse-icon" /> AI Speaking...
+                      </>
+                    ) : (
+                      <>
+                        <FiMic className="pulse-icon" /> Speak Now
+                      </>
+                    )}
+                  </div>
                 </div>
               </div>
               <p className="question-text-new">{currentQuestion?.text}</p>
