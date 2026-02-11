@@ -73,13 +73,27 @@ const processJob = async (data) => {
 
         // 4. Evaluate answer using AI
         console.log(`[Worker] Evaluating answer...`);
-        const aiEvaluation = await aiService.evaluateAnswer({
-            question: question.text,
-            answer: transcription.text || textAnswer || "No answer provided",
-            voiceMetrics: voiceAnalysis,
-            videoMetrics,
-            hintUsed: question.hintUsed
-        });
+        let aiEvaluation;
+
+        // processing failed transcription
+        if (transcription.text === "Transcription failed" || transcription.text === "No audio provided") {
+            console.warn("[Worker] Skipping AI evaluation due to missing transcription.");
+            aiEvaluation = {
+                technicalAccuracy: 0,
+                communicationSkills: 0,
+                confidenceScore: 0,
+                overallScore: 0,
+                feedback: "Audio was not captured clearly or transcription failed. Please check your microphone."
+            };
+        } else {
+            aiEvaluation = await aiService.evaluateAnswer({
+                question: question.text,
+                answer: transcription.text || textAnswer || "No answer provided",
+                voiceMetrics: voiceAnalysis,
+                videoMetrics,
+                hintUsed: question.hintUsed
+            });
+        }
         console.log(`[Worker] Evaluation score: ${aiEvaluation.overallScore}`);
 
         // 5. Update interview data directly in Redis/Memory
