@@ -42,8 +42,9 @@ const InterviewPage = () => {
   const [remainingTime, setRemainingTime] = useState(3600); // 1 hour = 3600 seconds
   const [attemptedQuestions, setAttemptedQuestions] = useState(new Set());
   const [showHintConfirm, setShowHintConfirm] = useState(false);
-  const [hintVisible, setHintVisible] = useState(false);
-  const [hintUsed, setHintUsed] = useState(false);
+  const [hintsRevealed, setHintsRevealed] = useState(0); // 0, 1, or 2
+  const [hintConfirmLevel, setHintConfirmLevel] = useState(0); // 1 or 2
+  const [hintsUsedCount, setHintsUsedCount] = useState(0);
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
@@ -123,8 +124,9 @@ const InterviewPage = () => {
     setCodeContent('// Write your code here...');
     setNotepadContent('');
     setShowHintConfirm(false);
-    setHintVisible(false);
-    setHintUsed(false);
+    setHintsRevealed(0);
+    setHintsUsedCount(0);
+    setHintConfirmLevel(0);
   };
 
   const submitAnswer = async () => {
@@ -148,7 +150,7 @@ const InterviewPage = () => {
         formData.append("textAnswer", notepadContent);
       }
 
-      formData.append("hintUsed", hintUsed);
+      formData.append("hintsUsed", hintsUsedCount);
 
       // Add empty audio blob to satisfy backend
       const emptyBlob = new Blob([], { type: 'audio/webm' });
@@ -407,11 +409,16 @@ const InterviewPage = () => {
               <p className="question-text-new">{currentQuestion?.text}</p>
 
               {/* Hint Section */}
-              {currentQuestion?.type === 'code' && currentQuestion?.hint && (
+              {currentQuestion?.type === 'code' && (currentQuestion?.hint1 || currentQuestion?.hint2) && (
                 <div className="hint-section" style={{ marginTop: '15px' }}>
-                  {!hintVisible ? (
+
+                  {/* Hint 1 Button */}
+                  {hintsRevealed < 1 && currentQuestion.hint1 && (
                     <button
-                      onClick={() => setShowHintConfirm(true)}
+                      onClick={() => {
+                        setHintConfirmLevel(1);
+                        setShowHintConfirm(true);
+                      }}
                       className="btn-get-hint"
                       style={{
                         background: '#f59e0b',
@@ -423,22 +430,67 @@ const InterviewPage = () => {
                         fontSize: '14px',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '8px'
+                        gap: '8px',
+                        marginBottom: '8px'
                       }}
                     >
-                      <FiAlertCircle /> Get Hint (Penalty Applies)
+                      <FiAlertCircle /> Get Hint 1 (Small Penalty)
                     </button>
-                  ) : (
+                  )}
+
+                  {/* Hint 1 Display */}
+                  {hintsRevealed >= 1 && currentQuestion.hint1 && (
                     <div className="hint-display" style={{
                       background: '#fffbeb',
                       border: '1px solid #fcd34d',
                       padding: '12px',
                       borderRadius: '8px',
-                      color: '#92400e'
+                      color: '#92400e',
+                      marginBottom: '8px'
                     }}>
-                      <strong>💡 Hint:</strong> {currentQuestion.hint}
+                      <strong>💡 Hint 1:</strong> {currentQuestion.hint1}
                     </div>
                   )}
+
+                  {/* Hint 2 Button */}
+                  {hintsRevealed === 1 && currentQuestion.hint2 && (
+                    <button
+                      onClick={() => {
+                        setHintConfirmLevel(2);
+                        setShowHintConfirm(true);
+                      }}
+                      className="btn-get-hint"
+                      style={{
+                        background: '#ef4444',
+                        color: 'white',
+                        border: 'none',
+                        padding: '8px 16px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '14px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '8px'
+                      }}
+                    >
+                      <FiAlertCircle /> Get Hint 2 (Large Penalty)
+                    </button>
+                  )}
+
+                  {/* Hint 2 Display */}
+                  {hintsRevealed >= 2 && currentQuestion.hint2 && (
+                    <div className="hint-display" style={{
+                      background: '#fef2f2',
+                      border: '1px solid #fca5a5',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      color: '#991b1b'
+                    }}>
+                      <strong>💡 Hint 2:</strong> {currentQuestion.hint2}
+                    </div>
+                  )}
+
                 </div>
               )}
             </div>
@@ -530,14 +582,22 @@ const InterviewPage = () => {
                 <div style={{ color: '#f59e0b', fontSize: '48px', marginBottom: '16px' }}>
                   <FiAlertCircle />
                 </div>
-                <h3 style={{ color: 'white', marginBottom: '12px' }}>Use Hint?</h3>
+                <h3 style={{ color: 'white', marginBottom: '12px' }}>
+                  Use Hint {hintConfirmLevel}?
+                </h3>
                 <p style={{ color: '#ccc', marginBottom: '24px' }}>
-                  Using a hint will result in a <strong>score deduction</strong> for this question.
+                  {hintConfirmLevel === 1
+                    ? "Using Hint 1 will verify a small score penalty (e.g. -10%)."
+                    : "Using Hint 2 will verify a larger score penalty (e.g. -25%) on top of previous penalties."}
+                  <br />
                   Are you sure you want to proceed?
                 </p>
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
                   <button
-                    onClick={() => setShowHintConfirm(false)}
+                    onClick={() => {
+                      setShowHintConfirm(false);
+                      setHintConfirmLevel(0);
+                    }}
                     style={{
                       padding: '10px 20px', borderRadius: '6px',
                       background: '#333', color: 'white', border: 'none', cursor: 'pointer'
@@ -547,17 +607,19 @@ const InterviewPage = () => {
                   </button>
                   <button
                     onClick={() => {
-                      setHintVisible(true);
-                      setHintUsed(true);
+                      setHintsRevealed(hintConfirmLevel);
+                      setHintsUsedCount(hintConfirmLevel);
                       setShowHintConfirm(false);
+                      setHintConfirmLevel(0);
                     }}
                     style={{
                       padding: '10px 20px', borderRadius: '6px',
-                      background: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer',
+                      background: hintConfirmLevel === 1 ? '#f59e0b' : '#ef4444',
+                      color: 'white', border: 'none', cursor: 'pointer',
                       fontWeight: 'bold'
                     }}
                   >
-                    Yes, Show Hint
+                    Yes, Show Hint {hintConfirmLevel}
                   </button>
                 </div>
               </div>

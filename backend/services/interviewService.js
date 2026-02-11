@@ -60,7 +60,9 @@ class InterviewService {
       videoMetrics: null,
       aiEvaluation: null,
       language: q.language || null, // for coding questions
-      hint: q.hint || null // for coding hints
+      language: q.language || null, // for coding questions
+      hint1: q.hint1 || null, // for coding hints
+      hint2: q.hint2 || null, // for coding hints
     }));
 
     // Attach audio to the first question
@@ -139,7 +141,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped, hintUsed }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped, hintsUsed }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -179,7 +181,7 @@ class InterviewService {
       question.answeredAt = Date.now();
     } else {
       // Store hint usage
-      question.hintUsed = hintUsed === 'true' || hintUsed === true;
+      question.hintsUsed = hintsUsed;
 
       // Store non-audio answers immediately
       if (textAnswer) {
@@ -204,7 +206,7 @@ class InterviewService {
           videoMetrics,
           textAnswer,
           codeAnswer,
-          hintUsed: hintUsed === 'true' || hintUsed === true
+          hintsUsed
         }, {
           attempts: 3,
           backoff: 5000
@@ -221,7 +223,7 @@ class InterviewService {
           videoMetrics,
           textAnswer,
           codeAnswer,
-          hintUsed: hintUsed === 'true' || hintUsed === true
+          hintsUsed
         }).catch(err => console.error('Direct processing error:', err));
       }
 

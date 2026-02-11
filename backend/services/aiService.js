@@ -14,6 +14,9 @@ class AIService {
     // Default models
     this.defaultModel = 'google/gemini-2.0-flash-001'; // Fast and capable
     this.complexModel = 'google/gemini-2.0-flash-001';
+
+    // Token tracking
+    this.totalSessionTokens = 0;
   }
 
   async callOpenRouter(prompt, model = this.defaultModel) {
@@ -45,11 +48,25 @@ class AIService {
       );
 
       if (response.data && response.data.choices && response.data.choices.length > 0) {
+        // Track tokens if available
+        if (response.data.usage && response.data.usage.total_tokens) {
+          const tokens = response.data.usage.total_tokens;
+          this.totalSessionTokens += tokens;
+          console.log(`[Token Tracker] Request: ${tokens} tokens | Session Total: ${this.totalSessionTokens} tokens`);
+        } else {
+          // Fallback estimation if usage not provided (approx 4 chars per token)
+          // This is rough but gives some visibility
+          const estimatedTokens = Math.ceil((prompt.length + (response.data.choices[0].message.content || "").length) / 4);
+          this.totalSessionTokens += estimatedTokens;
+          console.log(`[Token Tracker] Estimated Request: ${estimatedTokens} tokens | Session Total: ${this.totalSessionTokens} tokens`);
+        }
+
         return response.data.choices[0].message.content;
       }
       throw new Error('No valid response from OpenRouter API');
     } catch (error) {
       console.error('OpenRouter API Error:', error.response ? error.response.data : error.message);
+      console.log(`[Token Tracker] Request Failed (0 tokens consumed) | Session Total: ${this.totalSessionTokens} tokens`);
       throw error;
     }
   }
@@ -241,7 +258,8 @@ class AIService {
       - expectedTime (in seconds)
       - difficulty (medium/hard)
       - language (if type is code, suggest python/java/cpp/js or "any")
-      - hint (if type is "code", provide a small conceptual hint, otherwise null)
+      - hint1 (if type is "code", provide a small conceptual hint, otherwise null)
+      - hint2 (if type is "code", provide a more detailed implementation hint, otherwise null)
       
       IMPORTANT: Return ONLY valid JSON.
     `;
@@ -276,7 +294,7 @@ class AIService {
       [
         { "round": 1, "question": "...", "type": "cv-analysis", "expectedTime": 90, "difficulty": "medium" },
         ...
-        { "round": 2, "question": "Write a function...", "type": "code", "language": "python/java/js", "expectedTime": 300, "difficulty": "hard", "hint": "Consider using a hash map..." },
+        { "round": 2, "question": "Write a function...", "type": "code", "language": "python/java/js", "expectedTime": 300, "difficulty": "hard", "hint1": "Consider using...", "hint2": "You can optimize by..." },
         ...
       ]
 
@@ -323,7 +341,8 @@ class AIService {
         expectedTime: 300,
         difficulty: "hard",
         language: isCode ? "javascript" : null,
-        hint: isCode ? "Think about the data structure's properties." : null
+        hint1: isCode ? "Think about the data structure's properties." : null,
+        hint2: isCode ? "A two-pointer approach might be efficient here." : null
       });
     }
     // Round 3
@@ -368,7 +387,7 @@ class AIService {
       3. Practical experience scenarios
       4. Behavioral questions
       
-      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint (optional, for 'code' type)
+      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint1 (optional), hint2 (optional)
       
       IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
     `;
@@ -481,7 +500,7 @@ class AIService {
   }
 
   // Evaluate single answer
-  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics, hintUsed }) {
+  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics, hintsUsed }) {
     const prompt = `
       Evaluate this interview answer:
       
@@ -499,9 +518,11 @@ class AIService {
       - Attention Level: ${videoMetrics.attention}
       - Professionalism: ${videoMetrics.professionalism}
 
-      Hint Used: ${hintUsed ? "YES (Penalty required: deduct 10-15% score)" : "NO"}
 
-      Hint Used: ${metrics?.hintUsed ? "YES (Penalty required)" : "NO"}
+
+      Hint Usage: 
+      - Hints Used Count: ${hintsUsed || 0}
+      - Penalty Applied: ${hintsUsed > 0 ? "YES" : "NO"}
       
       Provide evaluation in this JSON format:
       {
@@ -647,35 +668,40 @@ class AIService {
         type: "behavioral",
         expectedTime: 120,
         difficulty: "easy",
-        hint: null
+        hint1: null,
+        hint2: null
       },
       {
         question: `Write a function to reverse a string in your preferred language.`,
         type: "code",
         expectedTime: 300,
         difficulty: "medium",
-        hint: "Consider iterating through the string backwards or using built-in reverse methods."
+        hint1: "Consider iterating through the string backwards or using built-in reverse methods.",
+        hint2: "In Python you can use string slicing [::-1], in JS .split('').reverse().join('')."
       },
       {
         question: "How do you approach solving complex problems in your work?",
         type: "technical",
         expectedTime: 120,
         difficulty: "medium",
-        hint: null
+        hint1: null,
+        hint2: null
       },
       {
         question: "Describe a challenging project you worked on and how you overcame obstacles.",
         type: "scenario",
         expectedTime: 150,
         difficulty: "hard",
-        hint: null
+        hint1: null,
+        hint2: null
       },
       {
         question: "What are your strengths and areas for improvement in technical work?",
         type: "behavioral",
         expectedTime: 90,
         difficulty: "medium",
-        hint: null
+        hint1: null,
+        hint2: null
       }
     ];
 

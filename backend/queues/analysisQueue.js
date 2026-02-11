@@ -10,7 +10,7 @@ let interviewService;
 
 // Extract the processing logic so it can be called directly
 const processJob = async (data) => {
-    const { interviewId, questionIndex, audioPath, audioMimeType, videoMetrics } = data;
+    const { interviewId, questionIndex, audioPath, audioMimeType, videoMetrics, hintsUsed } = data;
 
     if (!interviewService) {
         interviewService = require('../services/interviewService');
@@ -42,7 +42,8 @@ const processJob = async (data) => {
             question: question.text,
             answer: transcription.text,
             voiceMetrics: voiceAnalysis,
-            videoMetrics
+            videoMetrics,
+            hintsUsed
         });
 
         // 5. Update interview data directly in Redis/Memory
