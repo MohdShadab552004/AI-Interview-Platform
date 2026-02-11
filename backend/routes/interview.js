@@ -153,4 +153,38 @@ router.post('/:id/cheat-log', async (req, res) => {
   }
 });
 
+// Get token usage stats
+router.get('/token-stats', (req, res) => {
+  try {
+    const stats = interviewService.getTokenUsage();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Error getting token stats:', error);
+    res.status(500).json({ success: false, error: 'Failed to get token stats' });
+  }
+});
+
+router.get('/:interviewId/question/:questionIndex/audio', async (req, res) => {
+  try {
+    const { interviewId, questionIndex } = req.params;
+    const audioBuffer = await interviewService.getQuestionAudio(interviewId, parseInt(questionIndex));
+
+    if (!audioBuffer) {
+      return res.status(404).json({ success: false, error: 'Audio not found' });
+    }
+
+    // Determine content type (could be MP3 or WAV depending on source)
+    // Defaulting to audio/mpeg for wide compatibility, but if it's WAV buffer it might be audio/wav
+    // Hugging Face usually returns MP3 or WAV. Browser <audio> handles both well.
+    res.set('Content-Type', 'audio/mpeg');
+    res.send(audioBuffer);
+  } catch (error) {
+    console.error('Error serving audio:', error);
+    res.status(500).json({ success: false, error: 'Failed to serve audio' });
+  }
+});
+
 module.exports = router;

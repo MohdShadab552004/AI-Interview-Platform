@@ -41,7 +41,7 @@ class InterviewService {
       const cvText = await aiService.extractTextFromPDF(cvBuffer);
 
       // Generate all 25 questions in one go logic
-      questions = await aiService.generateFullInterview(cvText, 25);
+      questions = await aiService.generateFullInterview(cvText, position, experienceLevel, 25);
     } else {
       // Fallback old flow (without CV)
       questions = await aiService.generateQuestions(position, experienceLevel, 5);
@@ -329,6 +329,26 @@ class InterviewService {
 
     await this.saveInterview(interview);
     return { success: true, riskScore: interview.riskScore };
+  }
+
+  async getQuestionAudio(interviewId, questionIndex) {
+    const interview = await this.getInterview(interviewId);
+    if (!interview || !interview.questions[questionIndex]) return null;
+
+    const question = interview.questions[questionIndex];
+
+    // Check if audio buffer is already stored (from initially generated questions)
+    if (question.audio) {
+      if (Buffer.isBuffer(question.audio)) return question.audio;
+      if (question.audio.type === 'Buffer') return Buffer.from(question.audio.data);
+    }
+
+    // Generate on demand if missing
+    return await aiService.getAudioForText(question.text);
+  }
+
+  getTokenUsage() {
+    return aiService.getTokenStats();
   }
 }
 
