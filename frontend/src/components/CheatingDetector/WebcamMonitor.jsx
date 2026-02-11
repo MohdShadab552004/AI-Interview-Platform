@@ -53,13 +53,34 @@ const WebcamMonitor = ({ videoMetrics, isActive, onViolation }) => {
             });
         }
 
-        // 4. Gaze/Head Pose (Suspicious)
-        if (videoMetrics.gazePattern === 'suspicious_side' || videoMetrics.gazePattern === 'suspicious_side_eye') {
-            // We might want to throttle this significantly as it can change rapidly
-            // Let's assume onViolation/Manager handles some throttling or we do it here.
-            // For now, let's treat it as a warning if it persists, but MediaAnalyzer already calculates pattern over history.
-            // We'll log it occasionally.
-            if (Math.random() < 0.05) { // 5% chance per frame (approx once per sec at 20fps) - naive throttling
+        // 4. Posture Check
+        if (videoMetrics.posture && videoMetrics.posture.includes('Poor')) {
+            onViolation({
+                type: 'poor_posture',
+                details: 'Please maintain a straight posture (Shoulders tilted)',
+                severity: 'medium'
+            });
+        }
+
+        // 5. Excessive Movement Detection
+        if (videoMetrics.movementScore > 15) { // Threshold for "Excessive"
+            onViolation({
+                type: 'excessive_movement',
+                details: 'Excessive movement detected. Please stay still.',
+                severity: 'medium'
+            });
+        }
+
+        // 6. Gaze/Head Pose (Suspicious)
+        if (videoMetrics.gazePattern === 'extreme_side_gaze') {
+            onViolation({
+                type: 'extreme_gaze',
+                details: 'Extreme retina tilt detected (Possible phone reading)',
+                severity: 'critical'
+            });
+        } else if (videoMetrics.gazePattern === 'suspicious_side' || videoMetrics.gazePattern === 'suspicious_side_eye') {
+            // ...existing logic
+            if (Math.random() < 0.05) {
                 onViolation({
                     type: 'suspicious_gaze',
                     details: 'Frequent looking away detected',

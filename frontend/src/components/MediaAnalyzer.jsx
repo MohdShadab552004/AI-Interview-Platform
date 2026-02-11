@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { FaceMesh } from '@mediapipe/face_mesh';
+import { Pose } from '@mediapipe/pose';
 import { Camera } from '@mediapipe/camera_utils';
 import toast from 'react-hot-toast';
 import * as tf from '@tensorflow/tfjs';
@@ -16,6 +17,14 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
   const headMovementRef = useRef([]);
   const lastFrameTimeRef = useRef(performance.now());
   const frameCountRef = useRef(0);
+
+  // Pose Refs
+  const lastShoulderYRef = useRef(null);
+  const movementHistoryRef = useRef([]);
+
+  // Advanced Proctoring Persistence
+  const objectPersistenceRef = useRef({ objects: [], framesRemaining: 0 });
+  const irisStretchRef = useRef({ left: 0.5, right: 0.5 });
 
   const [calibrationState, setCalibrationState] = React.useState({
     isCalibrating: !skipCalibration,
@@ -61,6 +70,25 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       handleFaceResults(results);
     });
 
+    // 2. Pose
+    const pose = new Pose({
+      locateFile: (file) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`;
+      }
+    });
+
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    pose.onResults((results) => {
+      handlePoseResults(results);
+    });
+
     const camera = new Camera(webcamRef.current.video, {
       onFrame: async () => {
         if (webcamRef.current?.video && canvasRef.current) {
@@ -97,10 +125,31 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
           }
           frameCountRef.current++;
 
-          canvas.detectedObjects = detectedObjects.length > 0 ? detectedObjects : canvas.detectedObjects;
+          // Update object detection results (only on the throttled frame)
+          if (frameCountRef.current % 30 === 0) {
+            canvas.detectedObjects = detectedObjects;
+
+            // Persistence Logic
+            if (detectedObjects.length > 0) {
+              objectPersistenceRef.current = {
+                objects: detectedObjects,
+                framesRemaining: 90 // Persistent for ~3 seconds at 30fps
+              };
+            }
+          }
+
+          // Decrement persistence
+          if (objectPersistenceRef.current.framesRemaining > 0) {
+            objectPersistenceRef.current.framesRemaining--;
+          } else {
+            objectPersistenceRef.current.objects = [];
+          }
+
           canvas.networkQuality = networkQuality;
+          canvas.persistedObjects = objectPersistenceRef.current.objects;
 
           await faceMesh.send({ image: video });
+          await pose.send({ image: video });
         }
       },
       width: 1280,
@@ -167,11 +216,32 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       audioContextRef.current = audioContext;
       analyserRef.current = analyser;
 
+
+      // Start loop
       updateAudioLevel();
     } catch (error) {
       console.error('Audio analysis setup failed:', error);
     }
   };
+
+  const updateAudioLevel = () => {
+    if (!analyserRef.current) return;
+
+    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+    analyserRef.current.getByteFrequencyData(dataArray);
+
+    const average = dataArray.reduce((acc, val) => acc + val, 0) / dataArray.length;
+
+    // Normalize to 0-100
+    const normalized = Math.min(100, Math.round((average / 128) * 100)); // boost sensitivity
+
+    if (onAudioLevel) {
+      onAudioLevel(normalized);
+    }
+
+    animationRef.current = requestAnimationFrame(updateAudioLevel);
+  };
+
 
   useEffect(() => {
     return () => {
@@ -180,6 +250,48 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       }
     };
   }, []);
+
+  // handlePoseResults
+  const handlePoseResults = (results) => {
+    if (!results.poseLandmarks) return;
+
+    const landmarks = results.poseLandmarks;
+
+    // 1. Posture Check (Shoulder Alignment)
+    // Landmarks: 11 (Left Shoulder), 12 (Right Shoulder)
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+
+    let postureStatus = "Good";
+    if (leftShoulder && rightShoulder) {
+      const yDiff = Math.abs(leftShoulder.y - rightShoulder.y);
+      if (yDiff > 0.05) { // Threshold for tilt
+        postureStatus = "Poor (Shoulders Tilted)";
+      }
+    }
+
+    // 2. Excessive Movement logic
+    // Calculate average movement of shoulders
+    let movementScore = 0;
+    if (lastShoulderYRef.current !== null && leftShoulder) {
+      const delta = Math.abs(leftShoulder.y - lastShoulderYRef.current);
+      movementHistoryRef.current.push(delta);
+      if (movementHistoryRef.current.length > 20) movementHistoryRef.current.shift(); // Keep last 20 frames (~1 sec)
+
+      const avgMove = movementHistoryRef.current.reduce((a, b) => a + b, 0) / movementHistoryRef.current.length;
+      movementScore = avgMove * 100; // Scale up
+    }
+    if (leftShoulder) lastShoulderYRef.current = leftShoulder.y;
+
+
+    // Update metrics
+    onMetricsUpdate(prev => ({
+      ...prev,
+      posture: postureStatus,
+      movementScore: movementScore,
+      detectedObjects: canvasRef.current?.persistedObjects || [] // Use persistent objects
+    }));
+  };
   const handleFaceResults = (results) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -335,7 +447,14 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       const xValues = recentGaze.map(g => g.x);
       const avgX = xValues.reduce((a, b) => a + b, 0) / xValues.length;
 
-      if (isHeadStraight && isLookingSide) {
+      // EXTREME STRETCH DETECTION (Retina tilt with straight head)
+      const leftStretch = Math.abs(leftGazeX - 0.5);
+      const rightStretch = Math.abs(rightGazeX - 0.5);
+      const isStretched = leftStretch > 0.4 || rightStretch > 0.4; // 90% towards corner
+
+      if (isHeadStraight && isStretched) {
+        gazePattern = 'extreme_side_gaze';
+      } else if (isHeadStraight && isLookingSide) {
         gazePattern = 'suspicious_side_eye';
       } else if (Math.abs(avgX - 0.5) > 0.35) {
         gazePattern = 'suspicious_side';
@@ -344,7 +463,7 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       }
     }
 
-    const detectedObjects = canvasRef.current?.detectedObjects || [];
+    const detectedObjects = canvasRef.current?.persistedObjects || [];
     const networkQuality = canvasRef.current?.networkQuality || 1;
 
     onMetricsUpdate({
@@ -428,31 +547,7 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
     }
   };
 
-  /* Legacy drawLandmarks removed */
-  const drawLandmarks = (landmarks) => {
-    // Kept empty
-  };
 
-  const updateAudioLevel = () => {
-    if (!analyserRef.current) return;
-
-    const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-    analyserRef.current.getByteFrequencyData(dataArray);
-
-    // Calculate average volume
-    const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
-    const normalizedLevel = Math.min(average / 128, 1);
-
-    onAudioLevel(normalizedLevel);
-
-    animationRef.current = requestAnimationFrame(updateAudioLevel);
-  };
-
-  const startDetectingThinking = (landmarks) => {
-    // Heuristic: Looking UP usually indicates thinking
-    // Nose tip(1) vs Eye Line
-    return false; // Placeholder for more complex thinking logic
-  };
 
   return (
     <>
