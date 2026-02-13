@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const redis = require('redis');
 const aiService = require('./aiService');
+const judge0Service = require('./judge0Service');
 
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
@@ -148,7 +149,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped, hintsUsed }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, language, skipped, hintsUsed }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -190,6 +191,8 @@ class InterviewService {
       // Store hint usage
       question.hintsUsed = hintsUsed;
 
+      let executionResult = null;
+
       // Store non-audio answers immediately
       if (textAnswer) {
         question.answer = textAnswer;
@@ -197,6 +200,65 @@ class InterviewService {
       } else if (codeAnswer) {
         question.answer = codeAnswer;
         question.type = 'code';
+        question.language = language;
+
+        // Execute Code via Judge0
+        const languageMap = {
+          'javascript': 63,
+          'python': 71,
+          'java': 62,
+          'cpp': 54,
+          'c': 50
+        };
+        const langId = languageMap[language] || 63; // Default to JS
+
+        try {
+          // If we have test cases, run them all
+          if (question.testCases && question.testCases.length > 0) {
+            const results = [];
+            let passedCount = 0;
+
+            console.log(`[Interview Service] Running ${question.testCases.length} test cases for Q${questionIndex}...`);
+
+            for (const testCase of question.testCases) {
+              // Execute code with the specific input
+              const result = await judge0Service.executeCode(codeAnswer, langId, testCase.input);
+
+              // Normalize outputs for comparison (trim whitespace)
+              const actualOutput = (result.stdout || "").trim();
+              const expectedOutput = (testCase.output || "").trim();
+              const passed = actualOutput === expectedOutput;
+
+              if (passed) passedCount++;
+
+              results.push({
+                input: testCase.input,
+                expectedOutput: expectedOutput,
+                actualOutput: actualOutput,
+                error: result.stderr || result.compile_output || null,
+                passed: passed
+              });
+            }
+
+            executionResult = {
+              results: results,
+              passedCount: passedCount,
+              totalTests: question.testCases.length,
+              score: Math.round((passedCount / question.testCases.length) * 100),
+              summary: `${passedCount}/${question.testCases.length} Test Cases Passed`
+            };
+
+          } else {
+            // Fallback: Just run the code without input validation (for legacy/older questions)
+            executionResult = await judge0Service.executeCode(codeAnswer, langId);
+            executionResult.summary = "Execution Successful (No Test Cases Provided)";
+          }
+
+          question.executionResult = executionResult;
+        } catch (execErr) {
+          console.error("Code execution failed:", execErr);
+          question.executionResult = { error: "Execution failed locally", details: execErr.message };
+        }
       } else if (!audioBuffer) {
         console.warn("No answer content provided");
       }
@@ -223,6 +285,7 @@ class InterviewService {
         videoMetrics,
         textAnswer,
         codeAnswer,
+        executionResult, // Pass execution result to worker
         hintsUsed: hintsUsed // Aligning with HEAD variable name
       };
 

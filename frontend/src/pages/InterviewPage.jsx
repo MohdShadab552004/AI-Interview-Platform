@@ -7,13 +7,8 @@ import { CountdownCircleTimer } from 'react-countdown-circle-timer';
 import MediaAnalyzer from '../components/MediaAnalyzer';
 import CheatingDetectionManager from '../components/CheatingDetector/CheatingDetectionManager';
 import LockdownManager from '../components/CheatingDetector/LockdownManager';
-import Editor from 'react-simple-code-editor';
-import { highlight, languages } from 'prismjs/components/prism-core';
-import 'prismjs/components/prism-clike';
-import 'prismjs/components/prism-javascript';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-java';
-import 'prismjs/themes/prism-tomorrow.css';
+import Editor from '@monaco-editor/react';
+import { LANGUAGE_OPTIONS, getLanguageByValue } from '../utils/languageConstants';
 import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck, FiFileText, FiCode, FiVolume2, FiVolumeX } from 'react-icons/fi';
 
 const InterviewPage = () => {
@@ -35,10 +30,11 @@ const InterviewPage = () => {
   const [audioLevel, setAudioLevel] = useState(0);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
+  const [micPermissionGranted, setMicPermissionGranted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editorMode, setEditorMode] = useState('notepad'); // 'notepad' or 'code'
-  const [selectedLanguage, setSelectedLanguage] = useState('javascript');
-  const [codeContent, setCodeContent] = useState('// Write your code here...');
+  const [selectedLanguage, setSelectedLanguage] = useState(LANGUAGE_OPTIONS[0].value);
+  const [codeContent, setCodeContent] = useState(LANGUAGE_OPTIONS[0].boilerplate);
   const [notepadContent, setNotepadContent] = useState('');
   const [remainingTime, setRemainingTime] = useState(3600); // 1 hour = 3600 seconds
   const [attemptedQuestions, setAttemptedQuestions] = useState(new Set());
@@ -77,6 +73,31 @@ const InterviewPage = () => {
   const [hintUsed, setHintUsed] = useState(false);
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
+
+  // Request Mic Permission on Mount
+  useEffect(() => {
+    // Avoid ReferenceError by using state directly
+    const inSetupMode = !isSetupComplete;
+    console.log("InterviewPage Mount - inSetupMode:", inSetupMode);
+
+    if (inSetupMode) {
+      console.log("Requesting Mic Permission...");
+      try {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(() => {
+            console.log("Mic permission granted");
+            setMicPermissionGranted(true);
+          })
+          .catch((err) => {
+            console.error("Mic permission denied:", err);
+            toast.error("Microphone access is required for the interview.");
+            setMicPermissionGranted(false);
+          });
+      } catch (e) {
+        console.error("Sync error in getUserMedia:", e);
+      }
+    }
+  }, [isSetupComplete]);
 
   // Audio Playback Effect
   useEffect(() => {
@@ -254,7 +275,7 @@ const InterviewPage = () => {
     if (!interview || index < 0 || index >= interview.questions.length) return;
     setCurrentQuestionIndex(index);
     // Reset editor content
-    setCodeContent('// Write your code here...');
+    setCodeContent(getLanguageByValue(selectedLanguage).boilerplate);
     setNotepadContent('');
     setShowHintConfirm(false);
     setHintsRevealed(0);
@@ -395,6 +416,12 @@ const InterviewPage = () => {
       toast.info("This is the last question");
     }
   };
+  const handleEditorDidMount = (editor, monaco) => {
+  // Force a re-measure of the container size immediately
+  setTimeout(() => {
+    editor.layout();
+  }, 100);
+};
 
   const endInterview = async () => {
     try {
@@ -485,10 +512,11 @@ const InterviewPage = () => {
                 <div className="audio-meter">
                   <div className="audio-fill" style={{ width: `${audioLevel * 100}%` }} />
                 </div>
+                {!micPermissionGranted && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '5px' }}>⚠️ Microphone permission required</div>}
               </div>
               <button
-                className={`btn-start-session ${isCalibrated ? 'ready' : ''}`}
-                disabled={!isCalibrated}
+                className={`btn-start-session ${isCalibrated && micPermissionGranted ? 'ready' : ''}`}
+                disabled={!isCalibrated || !micPermissionGranted}
                 onClick={() => {
                   if (document.documentElement.requestFullscreen) {
                     document.documentElement.requestFullscreen().catch(err => {
@@ -502,16 +530,16 @@ const InterviewPage = () => {
                   padding: '16px',
                   fontSize: '18px',
                   fontWeight: 'bold',
-                  background: isCalibrated ? '#4CAF50' : '#444',
+                  background: (isCalibrated && micPermissionGranted) ? '#4CAF50' : '#444',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: isCalibrated ? 'pointer' : 'not-allowed',
-                  opacity: isCalibrated ? 1 : 0.7,
+                  cursor: (isCalibrated && micPermissionGranted) ? 'pointer' : 'not-allowed',
+                  opacity: (isCalibrated && micPermissionGranted) ? 1 : 0.7,
                   transition: 'all 0.3s'
                 }}
               >
-                {isCalibrated ? <><FiCheck /> Begin Interview</> : "Calibrating AI..."}
+                {(isCalibrated && micPermissionGranted) ? <><FiCheck /> Begin Interview</> : "Waiting for Setup..."}
               </button>
             </div>
           </div>
@@ -612,8 +640,8 @@ const InterviewPage = () => {
             </div>
 
             {/* Right Panel */}
-            <div className="right-panel">
-              <div className="question-display">
+            <div className="right-panel" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+              <div className="question-display" style={{ flex: '0 0 auto', maxHeight: '40vh', overflowY: 'auto', marginBottom: '10px' }}>
                 <div className="question-header-new">
                   <span className="question-number">Question {currentQuestionIndex + 1}/25</span>
                   <div className="question-badges">
@@ -745,65 +773,106 @@ const InterviewPage = () => {
                   </div>
                 )}
               </div>
+              
 
-              {/* Editor Mode Toggle */}
-              <div className="editor-mode-toggle">
-                <button
-                  className={`mode-btn ${editorMode === 'notepad' ? 'active' : ''}`}
-                  onClick={() => setEditorMode('notepad')}
-                >
-                  <FiFileText /> Notepad
-                </button>
-                <button
-                  className={`mode-btn ${editorMode === 'code' ? 'active' : ''}`}
-                  onClick={() => setEditorMode('code')}
-                >
-                  <FiCode /> Code Editor
-                </button>
-              </div>
-
-              {/* Editor Area */}
-              {editorMode === 'notepad' ? (
-                <div className="notepad-editor">
+              {currentQuestion?.type !== 'code' ? (
+                <div className="notepad-editor" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                   <textarea
                     value={notepadContent}
                     onChange={(e) => setNotepadContent(e.target.value)}
-                    placeholder="Write your answer here... (for email writing, paragraph, explanation, etc.)"
+                    placeholder="Write your answer here..."
                     className="notepad-textarea"
+                    style={{ flex: 1, minHeight: '300px', resize: 'none' }}
                   />
                 </div>
               ) : (
-                <div className="code-editor-area">
-                  <div className="code-editor-header">
+                /* 1. MAIN WRAPPER: Takes all remaining height in Right Panel */
+                <div style={{ 
+                  flex: 1, 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  minHeight: 0, // CRITICAL: Allows this flex child to shrink if needed
+                  backgroundColor: '#1e1e1e', 
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  marginTop: '10px',
+                  border: '1px solid #333'
+                }}>
+
+                  {/* 2. HEADER: Fixed Height (Don't shrink) */}
+                  <div style={{ 
+                    flex: '0 0 auto', 
+                    padding: '12px 16px', 
+                    backgroundColor: '#1e1e1e', 
+                    borderBottom: '1px solid #333',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}>
                     <select
                       value={selectedLanguage}
-                      onChange={(e) => setSelectedLanguage(e.target.value)}
+                      onChange={(e) => {
+                        const newLang = e.target.value;
+                        setSelectedLanguage(newLang);
+                        setCodeContent(getLanguageByValue(newLang).boilerplate);
+                      }}
                       className="language-selector"
+                      style={{
+                        backgroundColor: '#2d2d2d',
+                        color: '#fff',
+                        border: '1px solid #444',
+                        padding: '6px 12px',
+                        borderRadius: '4px',
+                        outline: 'none',
+                        cursor: 'pointer'
+                      }}
                     >
-                      <option value="javascript">JavaScript</option>
-                      <option value="python">Python</option>
-                      <option value="java">Java</option>
+                      {LANGUAGE_OPTIONS.map((lang) => (
+                        <option key={lang.id} value={lang.value}>
+                          {lang.name}
+                        </option>
+                      ))}
                     </select>
                   </div>
-                  <Editor
-                    value={codeContent}
-                    onValueChange={code => setCodeContent(code)}
-                    highlight={code => {
-                      const lang = languages[selectedLanguage] || languages.javascript;
-                      return highlight(code, lang);
-                    }}
-                    padding={20}
-                    className="code-editor-main"
-                    style={{
-                      minHeight: '400px',
-                      fontSize: '14px',
-                      fontFamily: '"Fira Code", "Courier New", monospace',
-                      background: '#1e1e1e',
-                      color: '#d4d4d4'
-                    }}
-                  />
+
+                  {/* 3. EDITOR BODY: Fills remaining space in Main Wrapper */}
+                  <div style={{ 
+                    flex: 1, 
+                    position: 'relative', // Anchor for absolute child
+                    minHeight: 0 
+                  }}>
+                    
+                    {/* 4. ABSOLUTE FILLER: Pins Editor to corners */}
+                    <div style={{ 
+                      position: 'absolute', 
+                      top: 0, 
+                      bottom: 0, 
+                      left: 0, 
+                      right: 0 
+                    }}>
+                      <Editor
+                        height="100%" // Refers to the Absolute Filler height
+                        width="100%"
+                        language={selectedLanguage}
+                        value={codeContent}
+                        theme="vs-dark"
+                        onMount={handleEditorDidMount}
+                        onChange={(value) => setCodeContent(value)}
+                        options={{
+                          minimap: { enabled: false },
+                          fontSize: 16,
+                          lineHeight: 24,
+                          padding: { top: 16 },
+                          automaticLayout: true,
+                          scrollBeyondLastLine: false,
+                          wordWrap: 'on',
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
+
+
 
               {/* Action Buttons */}
               <div className="action-buttons">

@@ -48,7 +48,7 @@ router.post('/start', upload.single('cv'), async (req, res) => {
 // Submit answer (audio + metrics)
 router.post('/submit-answer', upload.single('audio'), async (req, res) => {
   try {
-    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer, skipped, hintsUsed } = req.body;
+    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer, language, skipped, hintsUsed } = req.body;
     console.log('Interview ID:', interviewId);
     console.log('Question Index:', questionIndex);
     console.log('Skipped:', skipped);
@@ -71,6 +71,7 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
       videoMetrics: JSON.parse(videoMetrics || '{}'),
       textAnswer,
       codeAnswer,
+      language,
       hintsUsed: parseInt(hintsUsed || 0)
     });
 

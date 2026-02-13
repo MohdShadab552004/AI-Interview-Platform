@@ -489,14 +489,20 @@ class AIService {
 
     try {
       const results = await Promise.all([p1, p2, p3]);
-      const allQuestions = [...results[0].questions, ...results[1].questions, ...results[2].questions];
+
+      // Ensure we strictly adhere to the counts (slice if AI generated extra)
+      const q1 = results[0].questions.slice(0, 10);
+      const q2 = results[1].questions.slice(0, 10);
+      const q3 = results[2].questions.slice(0, 5);
+
+      const allQuestions = [...q1, ...q2, ...q3];
       const totalUsage = {
         prompt_tokens: (results[0].usage?.prompt_tokens || 0) + (results[1].usage?.prompt_tokens || 0) + (results[2].usage?.prompt_tokens || 0),
         completion_tokens: (results[0].usage?.completion_tokens || 0) + (results[1].usage?.completion_tokens || 0) + (results[2].usage?.completion_tokens || 0),
         total_tokens: (results[0].usage?.total_tokens || 0) + (results[1].usage?.total_tokens || 0) + (results[2].usage?.total_tokens || 0)
       };
 
-      console.log(`[AI Service] Generated ${allQuestions.length} questions total.`);
+      console.log(`[AI Service] Generated ${allQuestions.length} questions total (Strict Limit Enforced).`);
 
       if (allQuestions.length < 5) throw new Error("Too few questions generated");
       return { questions: allQuestions, usage: totalUsage };
@@ -544,7 +550,20 @@ class AIService {
       [
         { "round": 1, "question": "...", "type": "cv-analysis", "expectedTime": 90, "difficulty": "medium" },
         ...
-        { "round": 2, "question": "Write a function...", "type": "code", "language": "python/java/js", "expectedTime": 300, "difficulty": "hard", "hint1": "Consider using...", "hint2": "You can optimize by..." },
+        { 
+          "round": 2, 
+          "question": "Write a function...", 
+          "type": "code", 
+          "language": "python/java/js", 
+          "expectedTime": 300, 
+          "difficulty": "hard", 
+          "hint1": "Consider using...", 
+          "hint2": "You can optimize by...",
+          "testCases": [
+            { "input": "1, 2, 3", "output": "6" },
+            { "input": "...", "output": "..." }
+          ]
+        },
         ...
       ]
 
@@ -565,13 +584,43 @@ class AIService {
   }
 
   getRoundFallback(round, count, position) {
-    return Array(count).fill(0).map((_, i) => ({
-      round: round,
-      question: `Fallback Question ${i + 1} for Round ${round} (${position}): Please explain a key concept related to ${position}.`,
-      type: round === 2 ? "technical-problem" : "behavioral",
-      expectedTime: 120,
-      difficulty: "medium"
-    }));
+    return Array(count).fill(0).map((_, i) => {
+      let type = "behavioral";
+      let questionText = `Fallback Question ${i + 1} for Round ${round} (${position}): Please explain a key concept related to ${position}.`;
+      let language = null;
+
+      if (round === 1) {
+        type = "cv-analysis";
+        questionText = `Fallback CV Question ${i + 1}: Tell me about your experience with ${position}.`;
+      } else if (round === 2) {
+        // First half code, second half technical-problem
+        const isCode = i < Math.ceil(count / 2);
+        type = isCode ? "code" : "technical-problem";
+        questionText = isCode
+          ? `Write a function to solve a basic problem (e.g., Fibonacci sequence) relevant to ${position}.`
+          : `Explain a complex technical concept related to ${position}.`;
+
+        if (isCode) {
+          // Simple heuristic for language
+          language = position.toLowerCase().includes('python') ? 'python' : 'javascript';
+        }
+      }
+
+      return {
+        round: round,
+        question: questionText,
+        type: type,
+        expectedTime: type === 'code' ? 300 : 120,
+        difficulty: "medium",
+        language: language,
+        hint1: type === 'code' ? "Think about the base case first or use a specific data structure." : null,
+        hint2: type === 'code' ? "Consider the time complexity and edge cases." : null,
+        testCases: type === 'code' ? [
+          { input: "5", output: language === 'python' ? "5" : "5" }, // Example: Fibonacci(5) -> 5
+          { input: "10", output: "55" }
+        ] : []
+      };
+    });
   }
 
   generateFallbackFullInterview(count) {
