@@ -14,7 +14,7 @@ const upload = multer({
 // Start new interview
 router.post('/start', upload.single('cv'), async (req, res) => {
   try {
-    const { candidateName, email, position, experienceLevel, company, jobId } = req.body;
+    const { candidateName, email, position, experienceLevel, company, jobId, jobDescription } = req.body;
 
     console.log("start interview for", candidateName);
 
@@ -26,7 +26,8 @@ router.post('/start', upload.single('cv'), async (req, res) => {
       company,
       interviewId: jobId, // Optional
       userId: req.session.userId || 'anonymous',
-      cvBuffer: req.file ? req.file.buffer : null
+      cvBuffer: req.file ? req.file.buffer : null,
+      jobDescription
     });
 
     req.session.interviewId = interview.id;

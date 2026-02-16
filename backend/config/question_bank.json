@@ -1,0 +1,28 @@
+{
+    "fixed_hr_questions": [
+        {
+            "question": "Why do you think you are the right fit for this role?",
+            "type": "hr",
+            "expectedTime": 180,
+            "difficulty": "easy"
+        },
+        {
+            "question": "Where do you see yourself in the next 3-5 years?",
+            "type": "hr",
+            "expectedTime": 180,
+            "difficulty": "easy"
+        },
+        {
+            "question": "What are your salary expectations for this position?",
+            "type": "hr",
+            "expectedTime": 120,
+            "difficulty": "easy"
+        },
+        {
+            "question": "Tell me about a challenging situation you faced and how you handled it.",
+            "type": "hr",
+            "expectedTime": 240,
+            "difficulty": "medium"
+        }
+    ]
+}

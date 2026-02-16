@@ -463,6 +463,24 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       }
     }
 
+    // 3. ASYMMETRIC EYE DETECTION (One eye visible, other not)
+    const leftEyeVisible = leftIris && leftEyeInner && leftEyeOuter && leftEyeTop && leftEyeBottom;
+    const rightEyeVisible = rightIris && rightEyeInner && rightEyeOuter && rightEyeTop && rightEyeBottom;
+
+    let eyeSymmetry = 'both_visible';
+    if (leftEyeVisible && !rightEyeVisible) {
+      eyeSymmetry = 'only_left_visible';
+    } else if (!leftEyeVisible && rightEyeVisible) {
+      eyeSymmetry = 'only_right_visible';
+    } else if (!leftEyeVisible && !rightEyeVisible) {
+      eyeSymmetry = 'neither_visible';
+    }
+
+    // 4. CENTER GAZE MONITORING
+    // Check if eyes are looking at center/camera
+    const isLookingAtCenter = Math.abs(gazeX - 0.5) < 0.15 && Math.abs(gazeY - 0.5) < 0.2;
+    const gazeDeviation = Math.sqrt(Math.pow(gazeX - 0.5, 2) + Math.pow(gazeY - 0.5, 2));
+
     const detectedObjects = canvasRef.current?.persistedObjects || [];
     const networkQuality = canvasRef.current?.networkQuality || 1;
 
@@ -474,6 +492,9 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       faceDetected: true,
       faceCount: results.multiFaceLandmarks.length,
       gazePattern: gazePattern,
+      eyeSymmetry: eyeSymmetry,
+      isLookingAtCenter: isLookingAtCenter,
+      gazeDeviation: gazeDeviation,
       detectedObjects: detectedObjects,
       networkQuality: networkQuality
     });

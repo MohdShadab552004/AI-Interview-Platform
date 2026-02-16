@@ -8,7 +8,7 @@ module.exports = {
   OPENAI_API_KEY: process.env.OPENAI_API_KEY,
   ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY,
   HUGGINGFACE_API_KEY: process.env.HUGGINGFACE_API_KEY,
-  AI_PROVIDER: process.env.AI_PROVIDER || 'openrouter',
+  AI_PROVIDER: process.env.AI_PROVIDER || 'gemini',
 
 
   // Services

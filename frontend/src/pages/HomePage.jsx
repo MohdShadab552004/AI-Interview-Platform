@@ -24,10 +24,11 @@ const HomePage = () => {
   const [formData, setFormData] = useState({
     candidateName: 'Guest Candidate',
     email: 'guest@example.com',
-    position: 'General Developer',
+    position: '',
     experienceLevel: 'Mid-level',
     company: '',
     jobId: '',
+    jobDescription: '',
   });
 
   const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
@@ -64,6 +65,8 @@ const HomePage = () => {
       formPayload.append('experienceLevel', formData.experienceLevel);
       formPayload.append('company', formData.company);
       formPayload.append('jobId', formData.jobId);
+      formPayload.append('jobDescription', formData.jobDescription);
+
 
       if (formData.cvFile) {
         formPayload.append('cv', formData.cvFile);
@@ -192,16 +195,85 @@ const HomePage = () => {
             <div className="form-row">
               <div className="form-group">
                 <label htmlFor="position">Job Role</label>
-                <input
-                  type="text"
+                <select
                   id="position"
                   name="position"
                   value={formData.position}
                   onChange={handleInputChange}
-                  placeholder="e.g. Senior Backend Engineer"
                   required
                   disabled={loading}
-                />
+                >
+                  <option value="">Select a job role...</option>
+
+                  <optgroup label="IT & Software">
+                    <option value="Frontend Developer">Frontend Developer</option>
+                    <option value="Backend Developer">Backend Developer</option>
+                    <option value="Full Stack Developer">Full Stack Developer</option>
+                    <option value="Data Scientist">Data Scientist</option>
+                    <option value="DevOps Engineer">DevOps Engineer</option>
+                    <option value="Cybersecurity Analyst">Cybersecurity Analyst</option>
+                  </optgroup>
+
+                  <optgroup label="Corporate & HR">
+                    <option value="HR Executive">HR Executive</option>
+                    <option value="Talent Acquisition Specialist">Talent Acquisition Specialist</option>
+                  </optgroup>
+
+                  <optgroup label="Sales & Marketing">
+                    <option value="Sales Executive">Sales Executive</option>
+                    <option value="Digital Marketing Executive">Digital Marketing Executive</option>
+                  </optgroup>
+
+                  <optgroup label="Finance & Banking">
+                    <option value="Accountant">Accountant</option>
+                    <option value="Financial Analyst">Financial Analyst</option>
+                    <option value="Relationship Manager">Relationship Manager</option>
+                  </optgroup>
+
+                  <optgroup label="Healthcare">
+                    <option value="General Physician">General Physician</option>
+                    <option value="Nurse">Nurse</option>
+                    <option value="Pharmacist">Pharmacist</option>
+                  </optgroup>
+
+                  <optgroup label="Engineering">
+                    <option value="Mechanical Engineer">Mechanical Engineer</option>
+                    <option value="Civil Engineer">Civil Engineer</option>
+                    <option value="Electrical Engineer">Electrical Engineer</option>
+                  </optgroup>
+
+                  <optgroup label="Education">
+                    <option value="School Teacher">School Teacher</option>
+                    <option value="Professor">Professor</option>
+                  </optgroup>
+
+                  <optgroup label="Creative">
+                    <option value="Graphic Designer">Graphic Designer</option>
+                    <option value="Content Writer">Content Writer</option>
+                  </optgroup>
+
+                  <optgroup label="Hospitality">
+                    <option value="Hotel Manager">Hotel Manager</option>
+                    <option value="Chef">Chef</option>
+                  </optgroup>
+
+                  <optgroup label="Aviation & Maritime">
+                    <option value="Commercial Pilot">Commercial Pilot</option>
+                    <option value="Marine Engineer">Marine Engineer</option>
+                  </optgroup>
+
+                  <optgroup label="Legal">
+                    <option value="Corporate Lawyer">Corporate Lawyer</option>
+                  </optgroup>
+
+                  <optgroup label="Agriculture">
+                    <option value="Agricultural Officer">Agricultural Officer</option>
+                  </optgroup>
+
+                  <optgroup label="Retail">
+                    <option value="Store Manager">Store Manager</option>
+                  </optgroup>
+                </select>
               </div>
 
               <div className="form-group">
@@ -222,6 +294,20 @@ const HomePage = () => {
                 </select>
               </div>
             </div>
+
+            <div className="form-group">
+              <label htmlFor="jobDescription">Job Description / Requirements (Optional)</label>
+              <textarea
+                id="jobDescription"
+                name="jobDescription"
+                value={formData.jobDescription}
+                onChange={handleInputChange}
+                placeholder="Paste the job description or specific requirements here for more personalized questions..."
+                rows="4"
+                disabled={loading}
+              />
+            </div>
+
 
             <div className="form-group">
               <label>Resume / CV (Required)</label>

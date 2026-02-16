@@ -1,0 +1,502 @@
+{
+  "job_profiles": [
+    {
+      "industry": "IT & Software",
+      "role": "Frontend Developer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "IT & Software",
+      "role": "Backend Developer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "IT & Software",
+      "role": "Full Stack Developer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "IT & Software",
+      "role": "Data Scientist",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "IT & Software",
+      "role": "DevOps Engineer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "IT & Software",
+      "role": "Cybersecurity Analyst",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Corporate & HR",
+      "role": "HR Executive",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "HR",
+        "Managerial"
+      ]
+    },
+    {
+      "industry": "Corporate & HR",
+      "role": "Talent Acquisition Specialist",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "HR",
+        "Managerial"
+      ]
+    },
+    {
+      "industry": "Sales & Marketing",
+      "role": "Sales Executive",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "HR",
+        "Sales Manager"
+      ]
+    },
+    {
+      "industry": "Sales & Marketing",
+      "role": "Digital Marketing Executive",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "HR",
+        "Marketing Head"
+      ]
+    },
+    {
+      "industry": "Finance & Banking",
+      "role": "Accountant",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Finance & Banking",
+      "role": "Financial Analyst",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Finance & Banking",
+      "role": "Relationship Manager",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "HR",
+        "Branch Manager"
+      ]
+    },
+    {
+      "industry": "Healthcare",
+      "role": "General Physician",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years",
+        "10+ Years"
+      ],
+      "interview_rounds": [
+        "Medical Board",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Healthcare",
+      "role": "Nurse",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Practical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Healthcare",
+      "role": "Pharmacist",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Engineering",
+      "role": "Mechanical Engineer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Engineering",
+      "role": "Civil Engineer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Engineering",
+      "role": "Electrical Engineer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Education",
+      "role": "School Teacher",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Demo Class",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Education",
+      "role": "Professor",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "3-5 Years",
+        "5+ Years",
+        "10+ Years"
+      ],
+      "interview_rounds": [
+        "Academic",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Creative",
+      "role": "Graphic Designer",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Portfolio Review",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Creative",
+      "role": "Content Writer",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Writing Test",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Hospitality",
+      "role": "Hotel Manager",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "3-5 Years",
+        "5+ Years",
+        "10+ Years"
+      ],
+      "interview_rounds": [
+        "Operational",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Hospitality",
+      "role": "Chef",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Cooking Demo",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Aviation & Maritime",
+      "role": "Commercial Pilot",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years",
+        "10+ Years"
+      ],
+      "interview_rounds": [
+        "Simulator Test",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Aviation & Maritime",
+      "role": "Marine Engineer",
+      "category": "technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Legal",
+      "role": "Corporate Lawyer",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years",
+        "10+ Years"
+      ],
+      "interview_rounds": [
+        "Case Study",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Agriculture",
+      "role": "Agricultural Officer",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "Fresher",
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Technical",
+        "HR"
+      ]
+    },
+    {
+      "industry": "Retail",
+      "role": "Store Manager",
+      "category": "non_technical",
+      "question_count": 15,
+      "hr_questions": 4,
+      "experience_levels": [
+        "1-3 Years",
+        "3-5 Years",
+        "5+ Years"
+      ],
+      "interview_rounds": [
+        "Operational",
+        "HR"
+      ]
+    }
+  ]
+}

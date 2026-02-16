@@ -1,34 +1,25 @@
-// OpenRouter SDK caused installation issues on Windows, switching to direct Axios
-// Triggger restart for pdf-parse update
-// const { OpenRouter } = require("@openrouter/sdk");
+// Google Gemini focused AI Service
 const { default: axios } = require("axios");
 const FormData = require('form-data');
-const { HfInference } = require('@huggingface/inference');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 const env = require('../config/env');
+const fs = require('fs');
+const path = require('path');
+
 
 class AIService {
   constructor() {
-    this.apiKey = process.env.OPENROUTER_API_KEY;
-    this.hfToken = env.HUGGINGFACE_API_KEY;
-    this.aiProvider = env.AI_PROVIDER || 'openrouter'; // 'openrouter' or 'huggingface'
-
-    this.siteUrl = process.env.SITE_URL || 'http://localhost:5173';
-    this.siteTitle = 'Interview Platform';
+    this.geminiKey = process.env.GEMINI_API_KEY;
+    this.aiProvider = env.AI_PROVIDER || 'gemini';
     this.persona = env.INTERVIEWER_PERSONA;
 
-    // Default models
-    this.defaultModel = 'google/gemini-2.0-flash-001'; // Fast and capable (OpenRouter)
-    this.complexModel = 'google/gemini-2.0-flash-001';
+    // Default models - Use Gemini
+    this.defaultModel = 'gemini-2.5-flash';
+    this.complexModel = 'gemini-2.5-flash';
 
-    // Hugging Face Models
-    this.hfModel = 'mistralai/Mistral-7B-Instruct-v0.2'; // Faster and reliable
-    this.hfAudioModel = 'openai/whisper-tiny.en'; // Much faster for STT
-    this.hfTTSModel = 'microsoft/speecht5_tts'; // Highly reliable TTS
-
-
-    // Initialize HF Client
-    if (this.hfToken) {
-      this.hf = new HfInference(this.hfToken);
+    // Gemini Client
+    if (this.geminiKey) {
+      this.genAI = new GoogleGenerativeAI(this.geminiKey);
     }
 
     // Token Usage Tracking
@@ -40,155 +31,65 @@ class AIService {
     };
 
     console.log(`[AI Service] Initialized. Provider: ${this.aiProvider}`);
-    if (this.aiProvider === 'huggingface') {
-      console.log(`[AI Service] HF Model: ${this.hfModel}`);
-    }
-  }
 
-  // Main entry point for LLM calls
-  async callAI(prompt, modelOverride = null) {
-    if (this.aiProvider === 'huggingface') {
-      return this.callHuggingFace(prompt);
-    } else {
-      return this.callOpenRouter(prompt, modelOverride || this.defaultModel);
-    }
-  }
+    // Token Limit Configuration
+    this.tokenLimit = parseInt(process.env.TOKEN_LIMIT_PER_INTERVIEW) || 50000;
+    this.enableTokenFallback = process.env.ENABLE_TOKEN_FALLBACK !== 'false';
 
-  async callHuggingFace(prompt) {
+    // Load Question Bank and Job Profiles
     try {
-      if (!this.hf) {
-        console.warn('HUGGINGFACE_API_KEY is missing, falling back to OpenRouter');
-        return this.callOpenRouter(prompt, this.defaultModel);
-      }
+      const questionBankPath = path.join(__dirname, '../config/question_bank.json');
+      const jobProfilesPath = path.join(__dirname, '../config/job_profiles.json');
 
-      console.log(`[AI Service] Calling Hugging Face (Chat) with model: ${this.hfModel}`);
+      this.questionBank = JSON.parse(fs.readFileSync(questionBankPath, 'utf8'));
+      this.jobProfiles = JSON.parse(fs.readFileSync(jobProfilesPath, 'utf8'));
 
-      const systemPrompt = this.persona || "You are an expert technical interviewer.";
+      console.log('[AI Service] Question bank and job profiles loaded successfully');
+    } catch (error) {
+      console.error('[AI Service] Failed to load question bank or job profiles:', error.message);
+      this.questionBank = null;
+      this.jobProfiles = null;
+    }
 
-      const messages = [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: prompt }
-      ];
+    this.logFile = path.join(__dirname, '../ai_debug.log');
+    fs.writeFileSync(this.logFile, `[AI Service Started at ${new Date().toISOString()}]\n`);
+  }
 
-      // Use chatCompletion for Instruct/Chat models (Mistral, Zephyr, etc.)
-      const result = await this.hf.chatCompletion({
-        model: this.hfModel,
-        messages: messages,
-        max_tokens: 4096, // Increased to allow full interview generation (25 questions)
-        temperature: 0.7,
-        top_p: 0.9
+  logToFile(message) {
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}\n`;
+    fs.appendFileSync(this.logFile, logMessage);
+    console.log(message); // Still log to console
+  }
+
+  // Main entry point for LLM calls (Simplified to Gemini only)
+  async callAI(prompt, modelOverride = null) {
+    try {
+      return await this.callGemini(prompt, modelOverride || this.defaultModel);
+    } catch (err) {
+      this.logToFile(`[AI Service] Gemini failed: ${err.message}`);
+      throw err;
+    }
+  }
+
+  async callGemini(prompt, model = 'gemini-1.5-flash') {
+    try {
+      this.logToFile(`[AI Service] Calling Gemini with model: ${model}`);
+      const geminiModel = this.genAI.getGenerativeModel({
+        model: model,
+        systemInstruction: this.persona || "You are an expert technical interviewer."
       });
 
-      // Track usage (HF doesn't always return usage, but if it does...)
-      // Estimate if missing
-      let estimatedTokens = 0;
-      let responseContent = "";
+      const result = await geminiModel.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
 
-      if (result.choices && result.choices.length > 0) {
-        responseContent = result.choices[0].message.content;
-      } else {
-        throw new Error("Invalid response format from HF Chat Completion");
-      }
+      // Rough token estimation
+      this.tokenUsage.total_tokens += Math.ceil((prompt.length + text.length) / 4);
 
-      estimatedTokens = (prompt.length + responseContent.length) / 4;
-      this.tokenUsage.total_tokens += Math.ceil(estimatedTokens);
-
-      console.log(`[AI Monitor] Analyzed usage (est): ${Math.ceil(estimatedTokens)} tokens`);
-
-      console.log('--- [Hugging Face Raw Response Start] ---');
-      console.log(responseContent);
-      console.log('--- [Hugging Face Raw Response End] ---');
-
-      return responseContent.trim();
-
+      return text;
     } catch (error) {
-      console.error(`Hugging Face API Error (${this.hfModel}):`, error.message);
-
-      // Try Fallback Model (Phi-3 Mini is very reliable/fast)
-      if (this.hfModel !== 'microsoft/Phi-3-mini-4k-instruct') {
-        console.log('[AI Service] Switching to fallback model: microsoft/Phi-3-mini-4k-instruct');
-        try {
-          const result = await this.hf.chatCompletion({
-            model: 'microsoft/Phi-3-mini-4k-instruct',
-            messages: messages,
-            max_tokens: 2048,
-            temperature: 0.6
-          });
-          if (result.choices && result.choices.length > 0) {
-            const content = result.choices[0].message.content;
-            console.log('[AI Service] Fallback model successful.');
-            return content;
-          }
-        } catch (fallbackError) {
-          console.error('Fallback model also failed:', fallbackError.message);
-        }
-      }
-
-      // Fallback to OpenRouter on error if configured
-      if (this.apiKey) {
-        console.log('Falling back to OpenRouter...');
-        return this.callOpenRouter(prompt, this.defaultModel);
-      }
-      throw error;
-    }
-  }
-
-  async callOpenRouter(prompt, model = this.defaultModel) {
-    try {
-      if (!this.apiKey) {
-        throw new Error('OPENROUTER_API_KEY is not defined in environment variables');
-      }
-
-      const systemPrompt = (this.persona || "You are an expert technical interviewer.") +
-        "\nContext: Candidate Experience, Job Role, Required Experience." +
-        "\nLanguage Capability: Understand Hindi and English. If the user speaks Hindi/Hinglish, you may reply in Hinglish/Hindi where appropriate, but maintain professional standards." +
-        "\nIMPORTANT: You must follow the formatting instructions in the user prompt exactly (e.g., returning JSON).";
-
-      console.log(`[AI Service] Calling OpenRouter with model: ${model}`);
-
-      const response = await axios.post(
-        'https://openrouter.ai/api/v1/chat/completions',
-        {
-          model: model,
-          messages: [
-            {
-              role: 'system',
-              content: systemPrompt
-            },
-            {
-              role: 'user',
-              content: prompt,
-            },
-          ],
-          stream: false,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.apiKey}`,
-            'HTTP-Referer': this.siteUrl,
-            'X-Title': this.siteTitle,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      if (response.data && response.data.choices && response.data.choices.length > 0) {
-        // Track Token Usage
-        if (response.data.usage) {
-          const usage = response.data.usage;
-          this.tokenUsage.prompt_tokens += usage.prompt_tokens || 0;
-          this.tokenUsage.completion_tokens += usage.completion_tokens || 0;
-          this.tokenUsage.total_tokens += usage.total_tokens || 0;
-
-          console.log(`[AI Monitor] Usage for this req: ${usage.prompt_tokens} prompt + ${usage.completion_tokens} completion = ${usage.total_tokens} total tokens.`);
-          console.log(`[AI Monitor] Global Total: ${this.tokenUsage.total_tokens} tokens.`);
-        }
-
-        return response.data.choices[0].message.content;
-      }
-      throw new Error('No valid response from OpenRouter API');
-    } catch (error) {
-      console.error('OpenRouter API Error:', error.response ? error.response.data : error.message);
+      this.logToFile(`[AI Service] Gemini Error: ${error.message}`);
       throw error;
     }
   }
@@ -199,15 +100,25 @@ class AIService {
 
   async parseJSONResponse(text) {
     if (!text) return null;
+
+    // Sanitize control characters that break JSON parsing
+    const sanitizeJSON = (str) => {
+      return str
+        .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
+        .replace(/\\n/g, '\\n')  // Preserve escaped newlines
+        .replace(/\\r/g, '\\r')  // Preserve escaped carriage returns
+        .replace(/\\t/g, '\\t'); // Preserve escaped tabs
+    };
+
     try {
       // 1. Try parsing directly
-      return JSON.parse(text);
+      return JSON.parse(sanitizeJSON(text));
     } catch (e) {
       // 2. Try extracting from markdown code blocks ```json ... ```
       const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (codeBlockMatch) {
         try {
-          return JSON.parse(codeBlockMatch[1]);
+          return JSON.parse(sanitizeJSON(codeBlockMatch[1]));
         } catch (e2) {
           console.warn('Failed to parse JSON from code block');
         }
@@ -231,7 +142,7 @@ class AIService {
 
         if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
           const jsonStr = text.substring(startIdx, endIdx + 1);
-          return JSON.parse(jsonStr);
+          return JSON.parse(sanitizeJSON(jsonStr));
         }
       } catch (e3) {
         console.error('JSON parse error from extracted text:', e3);
@@ -242,82 +153,294 @@ class AIService {
     }
   }
 
-  // Generate interview questions
-  async generateQuestions(position, experienceLevel, count = 5) {
-    const prompt = `
-      You are an expert technical interviewer for ${position} position (${experienceLevel} level).
-      Generate ${count} interview questions that cover:
-      1. Technical knowledge specific to ${position}
-      2. Problem-solving skills
-      3. Practical experience scenarios
-      4. Behavioral questions
-      
-      Format: Return as JSON array with fields: question, type (technical/behavioral/scenario/code), expectedTime (in seconds), difficulty (easy/medium/hard), hint (optional, for code questions)
-      
-      IMPORTANT: Return ONLY valid JSON. Do not include any additional text, explanations, or markdown formatting.
-    `;
+  // Check if tokens are available
+  hasTokensRemaining() {
+    return this.tokenUsage.total_tokens < this.tokenLimit;
+  }
+
+  // Check if token limit is exceeded
+  isTokenExpired() {
+    return this.tokenUsage.total_tokens >= this.tokenLimit;
+  }
+
+  // Get job profile configuration
+  getJobProfile(role) {
+    if (!this.jobProfiles || !this.jobProfiles.job_profiles) {
+      return null;
+    }
+    return this.jobProfiles.job_profiles.find(
+      profile => profile.role.toLowerCase() === role.toLowerCase()
+    );
+  }
+
+  // Get fixed HR questions
+  getFixedHRQuestions(count = 4) {
+    if (!this.questionBank || !this.questionBank.fixed_hr_questions) {
+      console.warn('[AI Service] Fixed HR questions not found');
+      return [];
+    }
+    return this.questionBank.fixed_hr_questions.slice(0, count);
+  }
+
+  // Extract skills and experience from CV
+  async extractCVSkills(cvText) {
+    if (!cvText || cvText.trim() === '') {
+      return { skills: [], experience: [], projects: [], education: {} };
+    }
+
+    const prompt = `Analyze this CV and extract the following information in JSON format:
+{
+  "skills": ["list of technical and soft skills mentioned"],
+  "experience": [
+    {
+      "role": "job title",
+      "company": "company name",
+      "duration": "time period",
+      "responsibilities": ["key responsibilities"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "project name",
+      "technologies": ["technologies used"],
+      "description": "brief description"
+    }
+  ],
+  "education": {
+    "degree": "highest degree",
+    "specialization": "field of study"
+  }
+}
+
+CV Text:
+${cvText.substring(0, 4000)}
+
+Return ONLY valid JSON, no explanations.`;
 
     try {
+      console.log('[AI Service] Calling AI for CV skill extraction...');
       const text = await this.callAI(prompt);
-      console.log('OpenRouter raw response (Questions):', text);
-
       const parsed = await this.parseJSONResponse(text);
-      if (parsed) {
-        console.log('Successfully parsed questions:', parsed);
-        return parsed;
-      }
-
-      console.log('No JSON found in response, using fallback');
-      return this.getFallbackQuestions(position, count);
+      console.log('[AI Service] CV skills parsed:', !!parsed);
+      return parsed || { skills: [], experience: [], projects: [], education: {} };
     } catch (error) {
-      console.error('Error generating questions with OpenRouter:', error);
-      return this.getFallbackQuestions(position, count);
+      console.error('[AI Service] Error extracting CV skills:', error);
+      return { skills: [], experience: [], projects: [], education: {} };
     }
   }
 
-  // Transcribe audio using Python Whisper service (with OpenRouter/HF fallback)
+  // Extract requirements from Job Description
+  async extractJDRequirements(jobDescription) {
+    if (!jobDescription || jobDescription.trim() === '') {
+      return { requirements: [], responsibilities: [], preferred: [] };
+    }
+
+    const prompt = `Analyze this Job Description and extract the following in JSON format:
+{
+  "requirements": ["list of required skills and qualifications"],
+  "responsibilities": ["key job responsibilities"],
+  "preferred": ["preferred/nice-to-have qualifications"]
+}
+
+Job Description:
+${jobDescription.substring(0, 4000)}
+
+Return ONLY valid JSON, no explanations.`;
+
+    try {
+      console.log('[AI Service] Calling AI for JD requirement extraction...');
+      const text = await this.callAI(prompt);
+      const parsed = await this.parseJSONResponse(text);
+      console.log('[AI Service] JD requirements parsed:', !!parsed);
+      return parsed || { requirements: [], responsibilities: [], preferred: [] };
+    } catch (error) {
+      console.error('[AI Service] Error extracting JD requirements:', error);
+      return { requirements: [], responsibilities: [], preferred: [] };
+    }
+  }
+
+  // Generate questions based on CV and JD
+  async generateCVJDQuestions(position, cvSkills, jdRequirements, count) {
+    const profile = this.getJobProfile(position);
+    const isTechnical = profile && profile.category === 'technical';
+
+    const cvSkillsList = cvSkills.skills?.join(', ') || 'general skills';
+    const jdReqsList = jdRequirements.requirements?.join(', ') || 'role requirements';
+    const responsibilities = jdRequirements.responsibilities?.join(', ') || 'job responsibilities';
+
+    const prompt = isTechnical ?
+      `You are an expert technical interviewer for ${position} position.
+
+Generate ${count} PRACTICAL interview questions based on:
+- Candidate's CV Skills: ${cvSkillsList}
+- Job Requirements: ${jdReqsList}
+- Job Responsibilities: ${responsibilities}
+
+Question Distribution:
+- 50% questions on CV skills that match JD requirements
+- 30% scenario-based questions from job responsibilities
+- 20% questions on candidate's projects/experience
+
+Each question MUST include:
+{
+  "question": "Clear, specific question",
+  "type": "technical|scenario|experience",
+  "expectedTime": 180-600 (in seconds),
+  "difficulty": "easy|medium|hard",
+  "hint": "Optional hint for technical questions"
+}
+
+CRITICAL RULES:
+1. Questions must be RELEVANT to candidate's CV and JD
+2. Ask about specific skills mentioned in CV
+3. Create scenario questions based on job responsibilities
+4. Return ONLY valid JSON array, no markdown
+
+Return format: [{"question": "...", "type": "...", ...}, ...]`
+      : `You are an expert interviewer for ${position} position.
+
+Generate ${count} PRACTICAL interview questions based on:
+- Candidate's CV Experience: ${cvSkills.experience?.map(e => e.role).join(', ') || 'general experience'}
+- Job Requirements: ${jdReqsList}
+- Job Responsibilities: ${responsibilities}
+
+Question Distribution:
+- 40% CV-based questions (about their experience and achievements)
+- 30% Situational questions (based on job responsibilities)
+- 30% Behavioral questions (past experience and problem-solving)
+
+Format: [{"question": "...", "type": "cv-based|situational|behavioral", "expectedTime": 180-480, "difficulty": "easy|medium|hard"}, ...]
+
+CRITICAL: Questions must be SPECIFIC to candidate's CV and JD requirements.
+
+Return ONLY valid JSON array.`;
+
+    try {
+      const text = await this.callAI(prompt);
+      const parsed = await this.parseJSONResponse(text);
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.slice(0, count);
+      }
+      return this.getFallbackQuestionsByRole(position, count);
+    } catch (error) {
+      console.error('[AI Service] Error generating CV/JD questions:', error);
+      return this.getFallbackQuestionsByRole(position, count);
+    }
+  }
+
+
+  // Generate interview questions based on CV and Job Description
+  async generateQuestions(position, experienceLevel, cvText = '', jobDescription = '') {
+    console.log(`[AI Service] Generating questions for ${position} (${experienceLevel})`);
+
+    // Get job profile configuration
+    const profile = this.getJobProfile(position);
+    const questionCount = profile?.question_count || 15;
+    const hrCount = profile?.hr_questions || 4;
+    const roleQuestionCount = questionCount - hrCount; // 11 role-specific questions
+
+    console.log(`[AI Service] Total: ${questionCount} questions (${roleQuestionCount} role-specific + ${hrCount} HR)`);
+
+    try {
+      // Extract information from CV and JD
+      console.log('[AI Service] Parsing CV and JD...');
+      const cvSkills = await this.extractCVSkills(cvText);
+      const jdRequirements = await this.extractJDRequirements(jobDescription);
+
+      console.log('[AI Service] CV Skills extracted:', cvSkills.skills?.length || 0, 'skills');
+      console.log('[AI Service] JD Requirements extracted:', jdRequirements.requirements?.length || 0, 'requirements');
+
+      // Generate role-specific questions based on CV and JD
+      console.log(`[AI Service] Generating ${roleQuestionCount} CV/JD-based questions...`);
+      const roleQuestions = await this.generateCVJDQuestions(
+        position,
+        cvSkills,
+        jdRequirements,
+        roleQuestionCount
+      );
+
+      // Get fixed HR questions
+      const hrQuestions = this.getFixedHRQuestions(hrCount);
+
+      // Combine all questions
+      const allQuestions = [...roleQuestions, ...hrQuestions];
+
+      console.log(`[AI Service] Generated ${allQuestions.length} total questions`);
+      console.log(`  - ${roleQuestions.length} role-specific questions`);
+      console.log(`  - ${hrQuestions.length} HR questions`);
+
+      return allQuestions;
+
+    } catch (error) {
+      console.error('[AI Service] Error in generateQuestions:', error);
+
+      // Fallback to generic questions
+      console.log('[AI Service] Using fallback questions');
+      const fallbackQuestions = this.getFallbackQuestionsByRole(position, roleQuestionCount);
+      const hrQuestions = this.getFixedHRQuestions(hrCount);
+
+      return [...fallbackQuestions, ...hrQuestions];
+    }
+  }
+
+  // Fallback questions by role category
+  getFallbackQuestionsByRole(position, count) {
+    const profile = this.getJobProfile(position);
+    const isTechnical = profile && profile.category === 'technical';
+
+    const questions = [];
+    if (isTechnical) {
+      const techList = [
+        "Explain the core architecture of your last major project.",
+        "How do you handle error management and debugging in complex applications?",
+        "Describe a performance optimization you implemented recently.",
+        "How do you ensure code quality and maintainability in your work?",
+        "Explain the difference between different state management approaches you've used.",
+        "Talk about a challenging technical trade-off you had to make.",
+        "How do you approach database schema design for scalability?",
+        "Describe your experience with CI/CD pipelines and deployment processes.",
+        "What is your approach to security best practices in development?",
+        "How do you stay updated with the latest trends in your technology stack?",
+        "Explain a complex bug you found and how you fixed it."
+      ];
+      for (let i = 0; i < count; i++) {
+        questions.push({
+          question: techList[i % techList.length],
+          type: "technical",
+          expectedTime: 300,
+          difficulty: "medium"
+        });
+      }
+    } else {
+      const nonTechList = [
+        "Describe your process for managing complex projects and deadlines.",
+        "How do you handle conflict within a team or with stakeholders?",
+        "Tell me about a time you had to pivot your strategy based on new data.",
+        "How do you ensure effective communication across different departments?",
+        "Describe your approach to problem-solving in a fast-paced environment.",
+        "How do you prioritize your tasks when faced with multiple urgent requests?",
+        "Tell me about a successful initiative you led and its impact.",
+        "How do you handle feedback and criticism from your team or superiors?",
+        "Describe a time you had to persuade others to adopt your point of view.",
+        "What motivates you to perform at your best in this role?",
+        "How do you approach learning a new domain or industry quickly?"
+      ];
+      for (let i = 0; i < count; i++) {
+        questions.push({
+          question: nonTechList[i % nonTechList.length],
+          type: "behavioral",
+          expectedTime: 240,
+          difficulty: "medium"
+        });
+      }
+    }
+    return questions;
+  }
+
+  // Transcribe audio using Python Whisper service
   async transcribeAudio(audioBuffer, mimeType, metadata = {}) {
     try {
-      // 1. Try Hugging Face if configured
-      if (this.aiProvider === 'huggingface' && this.hf) {
-        // Use Distil-Whisper (Much faster) as primary, fallback to Tiny
-        const models = ['distil-whisper/distil-large-v3', 'openai/whisper-tiny'];
-
-        for (const model of models) {
-          console.log(`[AI Service] Transcribing with Hugging Face (${model})...`);
-
-          try {
-            // Create a timeout promise
-            const timeout = new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('Transcription timed out')), 20000)
-            );
-
-            const transcriptionPromise = this.hf.automaticSpeechRecognition({
-              model: model,
-              data: new Blob([audioBuffer], { type: mimeType })
-            });
-
-            // Race against timeout
-            const result = await Promise.race([transcriptionPromise, timeout]);
-
-            if (result && result.text) {
-              console.log(`HF Transcription successful (${model}):`, result.text.substring(0, 50) + "...");
-              return {
-                text: result.text,
-                language: "en",
-                duration: metadata.duration || 0,
-                confidence: 0.9,
-                provider: 'huggingface-whisper'
-              };
-            }
-          } catch (hfError) {
-            console.error(`Hugging Face Transcription failed (${model}):`, hfError.message);
-            // Continue to next model
-          }
-        }
-      }
-
-      // 2. Fallback to Python Whisper Service
+      // 1. Fallback to Python Whisper Service
       console.log('Sending audio to local Python Whisper service...');
       // ... (Python service call logic remains the same check below or assume fail)
       throw new Error("All transcription services failed");

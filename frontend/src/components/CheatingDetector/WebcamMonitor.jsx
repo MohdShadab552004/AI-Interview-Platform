@@ -89,6 +89,30 @@ const WebcamMonitor = ({ videoMetrics, isActive, onViolation }) => {
             }
         }
 
+        // 7. Asymmetric Eye Detection (One eye hidden)
+        if (videoMetrics.eyeSymmetry === 'only_left_visible' || videoMetrics.eyeSymmetry === 'only_right_visible') {
+            onViolation({
+                type: 'asymmetric_eyes',
+                details: 'One eye is not visible. Please face the camera directly.',
+                severity: 'high'
+            });
+        } else if (videoMetrics.eyeSymmetry === 'neither_visible') {
+            onViolation({
+                type: 'eyes_not_visible',
+                details: 'Eyes are not visible. Please adjust your position.',
+                severity: 'critical'
+            });
+        }
+
+        // 8. Off-Center Gaze Detection
+        if (videoMetrics.isLookingAtCenter === false && videoMetrics.gazeDeviation > 0.3) {
+            onViolation({
+                type: 'not_looking_at_camera',
+                details: 'Please look at the camera/center of screen.',
+                severity: 'medium'
+            });
+        }
+
     }, [videoMetrics, isActive, onViolation]);
 
     return null;

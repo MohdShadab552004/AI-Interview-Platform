@@ -30,22 +30,20 @@ class InterviewService {
     this.interviews = new Map();
   }
 
-  async createInterview({ candidateName, email, position, experienceLevel, company, userId, cvBuffer, interviewId: providedId }) {
+  async createInterview({ candidateName, email, position, experienceLevel, company, userId, cvBuffer, interviewId: providedId, jobDescription }) {
     const interviewId = providedId || uuidv4();
     const timestamp = Date.now();
 
     let questions = [];
+    let cvText = '';
 
     if (cvBuffer) {
-      // CV-based flow - NEW Full 25-Question Structure
-      const cvText = await aiService.extractTextFromPDF(cvBuffer);
-
-      // Generate all 25 questions in one go logic
-      questions = await aiService.generateFullInterview(cvText, position, experienceLevel, 25);
-    } else {
-      // Fallback old flow (without CV)
-      questions = await aiService.generateQuestions(position, experienceLevel, 5);
+      cvText = await aiService.extractTextFromPDF(cvBuffer);
     }
+
+    // Use the comprehensive generateQuestions method that handles CV and JD
+    questions = await aiService.generateQuestions(position, experienceLevel, cvText, jobDescription);
+
 
     const formattedQuestions = questions.map((q, i) => ({
       id: i,
