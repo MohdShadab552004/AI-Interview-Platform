@@ -22,7 +22,7 @@ class AIService {
       this.genAI = new GoogleGenerativeAI(this.geminiKey);
     }
 
-    // Token Usage Tracking
+    // Token Usage Tracking (Detailed)
     this.tokenUsage = {
       prompt_tokens: 0,
       completion_tokens: 0,
@@ -73,24 +73,43 @@ class AIService {
   }
 
   async callGemini(prompt, model = 'gemini-1.5-flash') {
-    try {
-      this.logToFile(`[AI Service] Calling Gemini with model: ${model}`);
-      const geminiModel = this.genAI.getGenerativeModel({
-        model: model,
-        systemInstruction: this.persona || "You are an expert technical interviewer."
-      });
+    const maxRetries = 3;
+    const baseDelay = 2000; // 2 seconds
 
-      const result = await geminiModel.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Add artificial delay before request to avoid rapid sequences (Throttling)
+        if (attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
-      // Rough token estimation
-      this.tokenUsage.total_tokens += Math.ceil((prompt.length + text.length) / 4);
+        this.logToFile(`[AI Service] Calling Gemini with model: ${model} (Attempt ${attempt + 1})`);
+        const geminiModel = this.genAI.getGenerativeModel({
+          model: model,
+          systemInstruction: this.persona || "You are an expert technical interviewer."
+        });
 
-      return text;
-    } catch (error) {
-      this.logToFile(`[AI Service] Gemini Error: ${error.message}`);
-      throw error;
+        const result = await geminiModel.generateContent(prompt);
+        const response = await result.response;
+        const text = response.text();
+
+        // Rough token estimation
+        this.tokenUsage.total_tokens += Math.ceil((prompt.length + text.length) / 4);
+
+        return text;
+      } catch (error) {
+        const isRateLimit = error.message?.includes('429') || error.status === 429;
+
+        if (isRateLimit && attempt < maxRetries) {
+          const delay = baseDelay * Math.pow(2, attempt) + Math.random() * 1000;
+          this.logToFile(`[AI Service] Quota Exceeded (429). Retrying in ${Math.round(delay / 1000)}s...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        this.logToFile(`[AI Service] Gemini Error: ${error.message}`);
+        throw error;
+      }
     }
   }
 
@@ -104,10 +123,8 @@ class AIService {
     // Sanitize control characters that break JSON parsing
     const sanitizeJSON = (str) => {
       return str
-        .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
-        .replace(/\\n/g, '\\n')  // Preserve escaped newlines
-        .replace(/\\r/g, '\\r')  // Preserve escaped carriage returns
-        .replace(/\\t/g, '\\t'); // Preserve escaped tabs
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '') // Remove control characters except \n, \r, \t
+        .trim();
     };
 
     try {
@@ -117,12 +134,21 @@ class AIService {
       // 2. Try extracting from markdown code blocks ```json ... ```
       const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (codeBlockMatch) {
+        const extracted = codeBlockMatch[1];
         try {
-          return JSON.parse(sanitizeJSON(codeBlockMatch[1]));
+          const sanitized = sanitizeJSON(extracted);
+          const res = JSON.parse(sanitized);
+          return res;
         } catch (e2) {
-          console.warn('Failed to parse JSON from code block');
+          console.warn('[AI Service] Failed to parse JSON from code block');
         }
       }
+
+      // 2.5 Clean basic markdown if present without code blocks
+      const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      try {
+        return JSON.parse(cleaned);
+      } catch (e2_5) { }
 
       // 3. Brute force: Find first '{' or '[' and last '}' or ']'
       try {
@@ -271,32 +297,35 @@ Return ONLY valid JSON, no explanations.`;
     const prompt = isTechnical ?
       `You are an expert technical interviewer for ${position} position.
 
-Generate ${count} PRACTICAL interview questions based on:
+Generate ${count} interview questions based on:
 - Candidate's CV Skills: ${cvSkillsList}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
 
 Question Distribution:
-- 50% questions on CV skills that match JD requirements
-- 30% scenario-based questions from job responsibilities
-- 20% questions on candidate's projects/experience
+- 50% "code" questions: Detailed coding challenges.
+- 30% "technical" questions: Deep conceptual/system design.
+- 20% "experience" questions: Based on projects in CV.
 
 Each question MUST include:
 {
   "question": "Clear, specific question",
-  "type": "technical|scenario|experience",
-  "expectedTime": 180-600 (in seconds),
+  "type": "code|technical|experience",
+  "expectedTime": 300-900 (in seconds),
   "difficulty": "easy|medium|hard",
-  "hint": "Optional hint for technical questions"
+  "language": "Suggested language (javascript/python/java/cpp)",
+  "hint1": "Small conceptual hint",
+  "hint2": "Detailed implementation hint",
+  "testCases": [
+    {"input": "example input", "output": "expected output"},
+    {"input": "edge case input", "output": "expected output"}
+  ]
 }
 
 CRITICAL RULES:
-1. Questions must be RELEVANT to candidate's CV and JD
-2. Ask about specific skills mentioned in CV
-3. Create scenario questions based on job responsibilities
-4. Return ONLY valid JSON array, no markdown
-
-Return format: [{"question": "...", "type": "...", ...}, ...]`
+1. Coding questions must be solvable in the editor and executed via Judge0.
+2. Non-coding questions should still be practical and role-specific.
+3. Return ONLY a valid JSON array.`
       : `You are an expert interviewer for ${position} position.
 
 Generate ${count} PRACTICAL interview questions based on:
@@ -304,16 +333,16 @@ Generate ${count} PRACTICAL interview questions based on:
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
 
-Question Distribution:
-- 40% CV-based questions (about their experience and achievements)
-- 30% Situational questions (based on job responsibilities)
-- 30% Behavioral questions (past experience and problem-solving)
+Question types to include:
+- "case-study": A specific workplace scenario requiring a detailed strategy.
+- "email-writing": Draft an email for a specific professional situation.
+- "essay-writing": Write a short response on a domain topic.
+- "situational": "What would you do if..." questions.
 
-Format: [{"question": "...", "type": "cv-based|situational|behavioral", "expectedTime": 180-480, "difficulty": "easy|medium|hard"}, ...]
+Format: [{"question": "...", "type": "case-study|email-writing|essay-writing|situational", "expectedTime": 300-600, "difficulty": "easy|medium|hard"}, ...]
 
-CRITICAL: Questions must be SPECIFIC to candidate's CV and JD requirements.
-
-Return ONLY valid JSON array.`;
+CRITICAL: At least 3 questions MUST be Case Studies or Writing tasks.
+Return ONLY a valid JSON array.`;
 
     try {
       const text = await this.callAI(prompt);
@@ -335,10 +364,20 @@ Return ONLY valid JSON array.`;
 
     // Get job profile configuration
     const profile = this.getJobProfile(position);
-    const questionCount = profile?.question_count || 15;
-    const hrCount = profile?.hr_questions || 4;
-    const roleQuestionCount = questionCount - hrCount; // 11 role-specific questions
 
+    // Enforce 20 for technical, 15 for non-technical as requested
+    let category = profile?.category;
+    if (!category) {
+      const techKeywords = ['developer', 'engineer', 'technician', 'data scientist', 'analyst', 'programmer', 'architect', 'devops', 'security', 'pilot', 'technical'];
+      const lowerPos = position.toLowerCase();
+      category = techKeywords.some(kw => lowerPos.includes(kw)) ? 'technical' : 'non_technical';
+    }
+
+    const questionCount = category === 'technical' ? 20 : 15;
+    const hrCount = profile?.hr_questions || 4;
+    const roleQuestionCount = questionCount - hrCount;
+
+    console.log(`[AI Service] Role: ${position} | Category: ${category}`);
     console.log(`[AI Service] Total: ${questionCount} questions (${roleQuestionCount} role-specific + ${hrCount} HR)`);
 
     try {
@@ -442,7 +481,38 @@ Return ONLY valid JSON array.`;
     try {
       // 1. Fallback to Python Whisper Service
       console.log('Sending audio to local Python Whisper service...');
-      // ... (Python service call logic remains the same check below or assume fail)
+
+      const formData = new FormData();
+      formData.append('audio', audioBuffer, {
+        filename: 'audio.wav',  // Python service expects a filename with extension
+        contentType: mimeType || 'audio/wav'
+      });
+
+      try {
+        const response = await axios.post(`${env.PYTHON_SERVICE_URL}/transcribe`, formData, {
+          headers: {
+            ...formData.getHeaders()
+          },
+          timeout: 30000 // 30s timeout
+        });
+
+        if (response.data && response.data.success) {
+          console.log(`Python Service Transcription successful:`, response.data.text.substring(0, 50) + "...");
+          return {
+            text: response.data.text,
+            language: "en",
+            duration: metadata.duration || 0,
+            confidence: 0.95,
+            provider: 'python-whisper-local'
+          };
+        } else {
+          throw new Error(response.data.error || "Python service returned unsuccessful");
+        }
+      } catch (pyError) {
+        console.error("Python Transcription Service failed:", pyError.message);
+        // proceed to error throw below to trigger soft fallback
+      }
+
       throw new Error("All transcription services failed");
 
     } catch (error) {
@@ -511,7 +581,8 @@ Return ONLY valid JSON array.`;
       - expectedTime (in seconds)
       - difficulty (medium/hard)
       - language (if type is code, suggest python/java/cpp/js or "any")
-      - hint (if type is "code", provide a small conceptual hint, otherwise null)
+      - hint1 (if type is "code", provide a small conceptual hint, otherwise null)
+      - hint2 (if type is "code", provide a more detailed implementation hint, otherwise null)
       
       IMPORTANT: Return ONLY valid JSON.
     `;
@@ -530,21 +601,27 @@ Return ONLY valid JSON array.`;
 
     try {
       const results = await Promise.all([p1, p2, p3]);
-      const allQuestions = [...results[0], ...results[1], ...results[2]];
 
-      console.log(`[AI Service] Generated ${allQuestions.length} questions total.`);
+      // Ensure we strictly adhere to the counts (slice if AI generated extra)
+      const q1 = results[0].questions.slice(0, 10);
+      const q2 = results[1].questions.slice(0, 10);
+      const q3 = results[2].questions.slice(0, 5);
+
+      const allQuestions = [...q1, ...q2, ...q3];
+      const totalUsage = {
+        prompt_tokens: (results[0].usage?.prompt_tokens || 0) + (results[1].usage?.prompt_tokens || 0) + (results[2].usage?.prompt_tokens || 0),
+        completion_tokens: (results[0].usage?.completion_tokens || 0) + (results[1].usage?.completion_tokens || 0) + (results[2].usage?.completion_tokens || 0),
+        total_tokens: (results[0].usage?.total_tokens || 0) + (results[1].usage?.total_tokens || 0) + (results[2].usage?.total_tokens || 0)
+      };
+
+      console.log(`[AI Service] Generated ${allQuestions.length} questions total (Strict Limit Enforced).`);
 
       if (allQuestions.length < 5) throw new Error("Too few questions generated");
-      return allQuestions;
+      return { questions: allQuestions, usage: totalUsage };
 
     } catch (error) {
       console.error('Error in parallel generation:', error);
-      this.hfTTSModel = 'microsoft/speecht5_tts'; // Highly reliable TTS
-
-      // Initialize HF Client
-      if (this.hfToken) {
-        return this.generateFallbackFullInterview(count);
-      }
+      return this.generateFallbackFullInterview(count);
     }
   }
 
@@ -557,36 +634,83 @@ Return ONLY valid JSON array.`;
       Generate ${count} questions for Round ${round}: ${focusArea}.
       
       Guidelines:
-      - If Round 1: Ask specific "How did you..." questions about their projects/claims. Type: "cv-analysis".
-      - If Round 2: Mix of "code" (write a function) and "technical-problem" (system design/debug). Difficulty: Medium/Hard.
-      - If Round 3: "behavioral" or "general". Difficulty: Hard.
+      - Round 1: Specific "How did you..." questions about projects/claims. Type: "cv-analysis".
+      - Round 2: Strict "code" challenges (write a function) for tech roles. For non-tech, focus on "case-study" or "professional-writing".
+      - Round 3: "behavioral" or "hard-logic".
 
-      Format: JSON Array of objects:
-      { "round": ${round}, "question": "...", "type": "...", "expectedTime": 120, "difficulty": "medium", "hint": "..." }
+      Specific Types for Tech: "code", "cv-analysis", "technical-problem".
+      Specific Types for Non-Tech: "case-study", "email-writing", "essay-writing", "behavioral".
 
-      IMPORTANT: Return ONLY valid JSON.
+      Format: Return as a JSON array EXACTLY with this structure:
+      [
+        { 
+          "question": "...", 
+          "type": "code|case-study|cv-analysis|...", 
+          "expectedTime": 300, 
+          "difficulty": "medium|hard",
+          "language": "python/js/etc (if code)",
+          "hint1": "...",
+          "hint2": "...",
+          "testCases": [{"input": "...", "output": "..."}] (if code)
+        }
+      ]
+
+      IMPORTANT: Technical Round 2 MUST have at least 5 "code" questions.
+      Non-Technical Round 2 MUST have at least 3 "case-study" or writing tasks.
+      Return ONLY valid JSON.
     `;
 
     try {
-      const text = await this.callAI(prompt, this.complexModel);
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed && Array.isArray(parsed) && parsed.length > 0) return parsed;
+      const { content, usage } = await this.callAI(prompt, this.complexModel);
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) return { questions: parsed, usage };
       throw new Error("Empty or invalid questions returned");
     } catch (e) {
       console.error(`Error generating Round ${round}:`, e.message);
       // Return specific fallback questions for this round to ensure we meet the count
-      return this.getRoundFallback(round, count, position);
+      const fallback = this.getRoundFallback(round, count, position);
+      return { questions: fallback, usage: { total_tokens: 0 } };
     }
   }
 
   getRoundFallback(round, count, position) {
-    return Array(count).fill(0).map((_, i) => ({
-      round: round,
-      question: `Fallback Question ${i + 1} for Round ${round} (${position}): Please explain a key concept related to ${position}.`,
-      type: round === 2 ? "technical-problem" : "behavioral",
-      expectedTime: 120,
-      difficulty: "medium"
-    }));
+    return Array(count).fill(0).map((_, i) => {
+      let type = "behavioral";
+      let questionText = `Fallback Question ${i + 1} for Round ${round} (${position}): Please explain a key concept related to ${position}.`;
+      let language = null;
+
+      if (round === 1) {
+        type = "cv-analysis";
+        questionText = `Fallback CV Question ${i + 1}: Tell me about your experience with ${position}.`;
+      } else if (round === 2) {
+        // First half code, second half technical-problem
+        const isCode = i < Math.ceil(count / 2);
+        type = isCode ? "code" : "technical-problem";
+        questionText = isCode
+          ? `Write a function to solve a basic problem (e.g., Fibonacci sequence) relevant to ${position}.`
+          : `Explain a complex technical concept related to ${position}.`;
+
+        if (isCode) {
+          // Simple heuristic for language
+          language = position.toLowerCase().includes('python') ? 'python' : 'javascript';
+        }
+      }
+
+      return {
+        round: round,
+        question: questionText,
+        type: type,
+        expectedTime: type === 'code' ? 300 : 120,
+        difficulty: "medium",
+        language: language,
+        hint1: type === 'code' ? "Think about the base case first or use a specific data structure." : null,
+        hint2: type === 'code' ? "Consider the time complexity and edge cases." : null,
+        testCases: type === 'code' ? [
+          { input: "5", output: language === 'python' ? "5" : "5" }, // Example: Fibonacci(5) -> 5
+          { input: "10", output: "55" }
+        ] : []
+      };
+    });
   }
 
   generateFallbackFullInterview(count) {
@@ -611,7 +735,8 @@ Return ONLY valid JSON array.`;
         expectedTime: 300,
         difficulty: "hard",
         language: isCode ? "javascript" : null,
-        hint: isCode ? "Think about the data structure's properties." : null
+        hint1: isCode ? "Think about the data structure's properties." : null,
+        hint2: isCode ? "A two-pointer approach might be efficient here." : null
       });
     }
     // Round 3
@@ -629,22 +754,26 @@ Return ONLY valid JSON array.`;
 
   async safeGenerateQuestions(prompt, count, fallbackType) {
     try {
-      const text = await this.callAI(prompt);
-      const parsed = await this.parseJSONResponse(text);
+      const { content, usage } = await this.callAI(prompt);
+      const parsed = await this.parseJSONResponse(content);
       if (parsed && Array.isArray(parsed)) {
-        return parsed;
+        return { questions: parsed, usage };
       }
       throw new Error('Invalid JSON format');
     } catch (error) {
       console.error('Error generating questions:', error);
-      return Array(count).fill(0).map((_, i) => ({
-        question: `Fallback ${fallbackType} question ${i + 1}`,
-        type: fallbackType,
-        expectedTime: 120,
-        difficulty: "medium"
-      }));
+      return {
+        questions: Array(count).fill(0).map((_, i) => ({
+          question: `Fallback ${fallbackType} question ${i + 1}`,
+          type: fallbackType,
+          expectedTime: 120,
+          difficulty: "medium"
+        })),
+        usage: { total_tokens: 0 }
+      };
     }
   }
+
 
   // Analyze voice metrics using Python voice analysis service
   async analyzeVoice(audioBuffer) {
@@ -723,7 +852,7 @@ Return ONLY valid JSON array.`;
         analysis: "Average video presentation detected"
       };
     } catch (error) {
-      console.error('Error analyzing video with OpenRouter:', error);
+      console.error('Error analyzing video:', error);
       return {
         eyeContact: 0.5,
         attention: 0.5,
@@ -736,7 +865,7 @@ Return ONLY valid JSON array.`;
   }
 
   // Evaluate single answer
-  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics, hintUsed }) {
+  async evaluateAnswer({ question, answer, voiceMetrics, videoMetrics, hintsUsed }) {
     const prompt = `
       Evaluate this interview answer:
       
@@ -754,9 +883,11 @@ Return ONLY valid JSON array.`;
       - Attention Level: ${videoMetrics.attention}
       - Professionalism: ${videoMetrics.professionalism}
 
-      Hint Used: ${hintUsed ? "YES (Penalty required: deduct 10-15% score)" : "NO"}
 
 
+      Hint Usage: 
+      - Hints Used Count: ${hintsUsed || 0}
+      - Penalty Applied: ${hintsUsed > 0 ? "YES" : "NO"}
       
       Provide evaluation in this JSON format:
       {
@@ -773,16 +904,16 @@ Return ONLY valid JSON array.`;
     `;
 
     try {
-      const text = await this.callAI(prompt);
-      console.log('Evaluation raw response:', text);
+      const { content, usage } = await this.callAI(prompt);
+      console.log('Evaluation raw response:', content);
 
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed) return parsed;
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed) return { evaluation: parsed, usage };
 
-      return this.getDefaultEvaluation();
+      return { evaluation: this.getDefaultEvaluation(), usage };
     } catch (error) {
       console.error('Error evaluating answer:', error);
-      return this.getDefaultEvaluation();
+      return { evaluation: this.getDefaultEvaluation(), usage: { total_tokens: 0 } };
     }
   }
 
@@ -793,6 +924,28 @@ Return ONLY valid JSON array.`;
       confidenceScore: 0.5,
       overallScore: 0.5,
       feedback: "Could not generate detailed evaluation due to AI service error."
+    };
+  }
+
+  getDefaultReport(candidateName, position) {
+    return {
+      summary: {
+        overallScore: 0,
+        technicalScore: 0,
+        communicationScore: 0,
+        decision: "Pending",
+        reason: "Could not generate report due to AI service unavailability."
+      },
+      detailedBreakdown: {
+        technicalSkills: { score: 0, feedback: "N/A" },
+        problemSolving: { score: 0, feedback: "N/A" },
+        communication: { score: 0, feedback: "N/A" },
+        confidence: { score: 0, feedback: "N/A" }
+      },
+      strengths: [],
+      weaknesses: ["Report generation failed"],
+      finalFeedback: `An error occurred while generating the final report for ${candidateName}. Please try again later.`,
+      suggestions: []
     };
   }
 
@@ -843,16 +996,16 @@ Return ONLY valid JSON array.`;
     `;
 
     try {
-      const text = await this.callAI(prompt, this.complexModel);
-      console.log('Final report raw response:', text);
+      const { content, usage } = await this.callAI(prompt, this.complexModel);
+      console.log('Final report raw response:', content);
 
-      const parsed = await this.parseJSONResponse(text);
-      if (parsed) return parsed;
+      const parsed = await this.parseJSONResponse(content);
+      if (parsed) return { report: parsed, usage };
 
-      return this.getDefaultReport(candidateName, position);
+      return { report: this.getDefaultReport(candidateName, position), usage };
     } catch (error) {
       console.error('Error generating final report:', error);
-      return this.getDefaultReport(candidateName, position);
+      return { report: this.getDefaultReport(candidateName, position), usage: { total_tokens: 0 } };
     }
   }
 
@@ -903,26 +1056,7 @@ Return ONLY valid JSON array.`;
       // Fallthrough to other methods
     }
 
-    // 2. Try Hugging Face if configured
-    if (this.aiProvider === 'huggingface' && this.hf) {
-      console.log(`[AI Service] Generating TTS with Hugging Face (${this.hfTTSModel})...`);
-      try {
-        const result = await this.hf.textToSpeech({
-          model: this.hfTTSModel,
-          inputs: text
-        });
-
-        if (result) {
-          const arrayBuffer = await result.arrayBuffer();
-          return Buffer.from(arrayBuffer);
-        }
-      } catch (hfError) {
-        console.error('Hugging Face TTS failed:', hfError.message);
-        // Fallthrough to Python service
-      }
-    }
-
-    // 3. Fallback to Python gTTS service
+    // 2. Fallback to Python gTTS service
     try {
       console.log('Generating TTS via Python service...');
       const response = await axios.post(`${env.PYTHON_SERVICE_URL}/tts`, {
@@ -947,6 +1081,37 @@ Return ONLY valid JSON array.`;
       return audioBuffer.toString('base64');
     }
     return null;
+  }
+
+  getFallbackQuestions(position, count) {
+    const baseQuestions = [
+      {
+        question: `Tell me about your experience with ${position} and why you're interested in this role.`,
+        type: "behavioral",
+        expectedTime: 120,
+        difficulty: "easy",
+        hint1: null,
+        hint2: null
+      },
+      {
+        question: `Write a function to reverse a string in your preferred language.`,
+        type: "code",
+        expectedTime: 300,
+        difficulty: "medium",
+        hint1: "You can iterate through the string backwards.",
+        hint2: "Consider using built-in methods like split(), reverse(), and join()."
+      },
+      {
+        question: `Describe a challenging technical problem you solved recently.`,
+        type: "behavioral",
+        expectedTime: 180,
+        difficulty: "medium",
+        hint1: null,
+        hint2: null
+      }
+    ];
+
+    return baseQuestions.slice(0, count);
   }
 }
 

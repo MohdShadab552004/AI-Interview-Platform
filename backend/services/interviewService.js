@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const redis = require('redis');
 const aiService = require('./aiService');
+const judge0Service = require('./judge0Service');
 
 const redisClient = redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
@@ -34,15 +35,15 @@ class InterviewService {
     const interviewId = providedId || uuidv4();
     const timestamp = Date.now();
 
-    let questions = [];
     let cvText = '';
+    let initialTokenUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
     if (cvBuffer) {
       cvText = await aiService.extractTextFromPDF(cvBuffer);
     }
 
     // Use the comprehensive generateQuestions method that handles CV and JD
-    questions = await aiService.generateQuestions(position, experienceLevel, cvText, jobDescription);
+    const questions = await aiService.generateQuestions(position, experienceLevel, cvText, jobDescription);
 
 
     const formattedQuestions = questions.map((q, i) => ({
@@ -55,10 +56,9 @@ class InterviewService {
       voiceAnalysis: null,
       videoMetrics: null,
       aiEvaluation: null,
-      videoMetrics: null,
-      aiEvaluation: null,
       language: q.language || null, // for coding questions
-      hint: q.hint || null // for coding hints
+      hint1: q.hint1 || null, // for coding hints
+      hint2: q.hint2 || null, // for coding hints
     }));
 
     // Attach audio to the first question
@@ -87,7 +87,8 @@ class InterviewService {
       },
       finalEvaluation: null,
       cheatLogs: [],
-      riskScore: 0
+      riskScore: 0,
+      tokenUsage: initialTokenUsage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
     };
 
     // Store in Redis with 24h expiry if connected, otherwise in memory
@@ -137,7 +138,7 @@ class InterviewService {
     }
   }
 
-  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, skipped, hintUsed }) {
+  async processAnswer({ interviewId, questionIndex, audioBuffer, audioMimeType, videoMetrics, textAnswer, codeAnswer, language, skipped, hintsUsed }) {
     const interview = await this.getInterview(interviewId);
 
     if (!interview) {
@@ -177,7 +178,9 @@ class InterviewService {
       question.answeredAt = Date.now();
     } else {
       // Store hint usage
-      question.hintUsed = hintUsed === 'true' || hintUsed === true;
+      question.hintsUsed = hintsUsed;
+
+      let executionResult = null;
 
       // Store non-audio answers immediately
       if (textAnswer) {
@@ -186,6 +189,65 @@ class InterviewService {
       } else if (codeAnswer) {
         question.answer = codeAnswer;
         question.type = 'code';
+        question.language = language;
+
+        // Execute Code via Judge0
+        const languageMap = {
+          'javascript': 63,
+          'python': 71,
+          'java': 62,
+          'cpp': 54,
+          'c': 50
+        };
+        const langId = languageMap[language] || 63; // Default to JS
+
+        try {
+          // If we have test cases, run them all
+          if (question.testCases && question.testCases.length > 0) {
+            const results = [];
+            let passedCount = 0;
+
+            console.log(`[Interview Service] Running ${question.testCases.length} test cases for Q${questionIndex}...`);
+
+            for (const testCase of question.testCases) {
+              // Execute code with the specific input
+              const result = await judge0Service.executeCode(codeAnswer, langId, testCase.input);
+
+              // Normalize outputs for comparison (trim whitespace)
+              const actualOutput = (result.stdout || "").trim();
+              const expectedOutput = (testCase.output || "").trim();
+              const passed = actualOutput === expectedOutput;
+
+              if (passed) passedCount++;
+
+              results.push({
+                input: testCase.input,
+                expectedOutput: expectedOutput,
+                actualOutput: actualOutput,
+                error: result.stderr || result.compile_output || null,
+                passed: passed
+              });
+            }
+
+            executionResult = {
+              results: results,
+              passedCount: passedCount,
+              totalTests: question.testCases.length,
+              score: Math.round((passedCount / question.testCases.length) * 100),
+              summary: `${passedCount}/${question.testCases.length} Test Cases Passed`
+            };
+
+          } else {
+            // Fallback: Just run the code without input validation (for legacy/older questions)
+            executionResult = await judge0Service.executeCode(codeAnswer, langId);
+            executionResult.summary = "Execution Successful (No Test Cases Provided)";
+          }
+
+          question.executionResult = executionResult;
+        } catch (execErr) {
+          console.error("Code execution failed:", execErr);
+          question.executionResult = { error: "Execution failed locally", details: execErr.message };
+        }
       } else if (!audioBuffer) {
         console.warn("No answer content provided");
       }
@@ -200,6 +262,9 @@ class InterviewService {
         question.answer = textAnswer || codeAnswer;
       }
 
+
+
+
       // Payload for processing
       const jobData = {
         interviewId,
@@ -209,7 +274,8 @@ class InterviewService {
         videoMetrics,
         textAnswer,
         codeAnswer,
-        hintUsed: hintUsed === 'true' || hintUsed === true
+        executionResult, // Pass execution result to worker
+        hintsUsed: hintsUsed // Aligning with HEAD variable name
       };
 
       // Add to queue or process directly
@@ -270,12 +336,14 @@ class InterviewService {
       evaluation: q.aiEvaluation
     }));
 
-    return await aiService.generateFinalReport({
+    const result = await aiService.generateFinalReport({
       candidateName: interview.candidateName,
       position: interview.position,
       answers: answersSummary,
       metrics: interview.metrics
     });
+
+    return { report: result.report, usage: result.usage };
   }
 
   async endInterview(interviewId) {
@@ -307,7 +375,16 @@ class InterviewService {
       interview.endTime = Date.now();
 
       // Generate final evaluation
-      interview.finalEvaluation = await this.generateFinalEvaluation(interview);
+      const finalResult = await this.generateFinalEvaluation(interview);
+      interview.finalEvaluation = finalResult.report;
+
+      // Update token usage
+      if (finalResult.usage) {
+        if (!interview.tokenUsage) interview.tokenUsage = { total_tokens: 0 };
+        interview.tokenUsage.total_tokens = (interview.tokenUsage.total_tokens || 0) + (finalResult.usage.total_tokens || 0);
+        interview.tokenUsage.prompt_tokens = (interview.tokenUsage.prompt_tokens || 0) + (finalResult.usage.prompt_tokens || 0);
+        interview.tokenUsage.completion_tokens = (interview.tokenUsage.completion_tokens || 0) + (finalResult.usage.completion_tokens || 0);
+      }
 
       await this.saveInterview(interview);
     }

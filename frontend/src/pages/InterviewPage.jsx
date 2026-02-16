@@ -9,13 +9,8 @@ import CheatingDetectionManager from '../components/CheatingDetector/CheatingDet
 import LockdownManager from '../components/CheatingDetector/LockdownManager';
 import PreInterviewGuidelines from '../components/PreInterviewGuidelines';
 import MediaPermissionGate from '../components/MediaPermissionGate';
-import Editor from 'react-simple-code-editor';
-import { highlight, languages } from 'prismjs/components/prism-core';
-import 'prismjs/components/prism-clike';
-import 'prismjs/components/prism-javascript';
-import 'prismjs/components/prism-python';
-import 'prismjs/components/prism-java';
-import 'prismjs/themes/prism-tomorrow.css';
+import Editor from '@monaco-editor/react';
+import { LANGUAGE_OPTIONS, getLanguageByValue } from '../utils/languageConstants';
 import { FiMonitor, FiVideo, FiMic, FiAlertCircle, FiSettings, FiCheck, FiFileText, FiCode, FiVolume2, FiVolumeX } from 'react-icons/fi';
 
 const InterviewPage = () => {
@@ -39,20 +34,31 @@ const InterviewPage = () => {
   const [mediaPermissionsGranted, setMediaPermissionsGranted] = useState(false);
   const [isSetupComplete, setIsSetupComplete] = useState(false);
   const [isCalibrated, setIsCalibrated] = useState(false);
+  const [micPermissionGranted, setMicPermissionGranted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [editorMode, setEditorMode] = useState('notepad'); // 'notepad' or 'code'
-  const [selectedLanguage, setSelectedLanguage] = useState('javascript');
-  const [codeContent, setCodeContent] = useState('// Write your code here...');
+  const [selectedLanguage, setSelectedLanguage] = useState(LANGUAGE_OPTIONS[0].value);
+  const [codeContent, setCodeContent] = useState(LANGUAGE_OPTIONS[0].boilerplate);
   const [notepadContent, setNotepadContent] = useState('');
   const [remainingTime, setRemainingTime] = useState(3600); // 1 hour = 3600 seconds
   const [attemptedQuestions, setAttemptedQuestions] = useState(new Set());
   const [violationLogs, setViolationLogs] = useState([]);
+  const [showHintConfirm, setShowHintConfirm] = useState(false);
+  const [hintsRevealed, setHintsRevealed] = useState(0); // 0, 1, or 2
+  const [hintConfirmLevel, setHintConfirmLevel] = useState(0); // 1 or 2
+  const [hintsUsedCount, setHintsUsedCount] = useState(0);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [hintVisible, setHintVisible] = useState(false);
+  const [hintUsed, setHintUsed] = useState(false);
+  const [codeOutput, setCodeOutput] = useState(null);
+  const [isRunningCode, setIsRunningCode] = useState(false);
+
+  const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
 
   const handleLockdownViolation = useCallback(async (violation) => {
     console.warn("Lockdown Violation:", violation);
     setViolationLogs(prev => [...prev, violation]);
 
-    // Auto-alert for critical ones
     if (violation.type === 'fullscreen_exit' || violation.type === 'tab_switch' || violation.type === 'window_blur') {
       toast.error(`Security Warning: ${violation.type.replace('_', ' ')} detected!`, {
         duration: 5000,
@@ -62,22 +68,36 @@ const InterviewPage = () => {
 
     if (interview?.id) {
       try {
-        await axios.post(`/api/interviews/${interview.id}/violations`, {
+        await axios.post(`${API_BASE}/interview/${interview.id}/cheat-log`, {
           type: 'lockdown',
-          details: violation
+          details: violation,
+          severity: 'critical'
         });
       } catch (err) {
         console.error("Failed to log lockdown violation:", err);
       }
     }
-  }, [interview]);
+  }, [interview, API_BASE]);
 
-  const [showHintConfirm, setShowHintConfirm] = useState(false);
-  const [hintVisible, setHintVisible] = useState(false);
-  const [hintUsed, setHintUsed] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-
-  const API_BASE = import.meta.env.VITE_APP_API_URL || 'http://localhost:5000/api';
+  // Request Mic Permission on Mount
+  useEffect(() => {
+    const inSetupMode = !isSetupComplete;
+    if (inSetupMode) {
+      try {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+          .then(() => {
+            setMicPermissionGranted(true);
+          })
+          .catch((err) => {
+            console.error("Mic permission denied:", err);
+            toast.error("Microphone access is required for the interview.");
+            setMicPermissionGranted(false);
+          });
+      } catch (e) {
+        console.error("Sync error in getUserMedia:", e);
+      }
+    }
+  }, [isSetupComplete]);
 
   // Audio Playback Effect
   useEffect(() => {
@@ -87,28 +107,23 @@ const InterviewPage = () => {
 
     const playQuestionAudio = async () => {
       setIsSpeaking(true);
-      // Stop any previous audio
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
       }
-      // Stop browser TTS if any
       window.speechSynthesis.cancel();
 
       try {
         const audioUrl = `${API_BASE}/interview/${sessionId}/question/${currentQuestionIndex}/audio`;
-
         audio = new Audio(audioUrl);
         activeAudioRef.current = audio;
 
-        // Safety timeout to prevent getting stuck in "AI Speaking" mode
         const safetyTimeout = setTimeout(() => {
           if (activeAudioRef.current === audio) {
-            console.warn("Audio playback timed out, forcing state change");
             setIsSpeaking(false);
             toast.info("Audio timed out. Please provide your answer now.");
           }
-        }, 40000); // 40 seconds max for any question
+        }, 40000);
 
         audio.onended = () => {
           clearTimeout(safetyTimeout);
@@ -120,57 +135,24 @@ const InterviewPage = () => {
         audio.onerror = (err) => {
           clearTimeout(safetyTimeout);
           console.warn("Backend audio failed, falling back to Browser TTS:", err);
-
-          // Fallback to Browser Speech Synthesis
           const questionText = interview.questions[currentQuestionIndex]?.text;
           if (questionText) {
-            // Cancel any ongoing speech
             window.speechSynthesis.cancel();
-
             const utterance = new SpeechSynthesisUtterance(questionText);
             utterance.lang = 'en-US';
-            utterance.rate = 1.0;
-            utterance.pitch = 1.0;
-
-            utterance.onend = () => {
-              setIsSpeaking(false);
-              toast.success("🎤 Now it's your turn to speak!");
-            };
-            utterance.onerror = (e) => {
-              console.error("Browser TTS failed:", e);
-              setIsSpeaking(false);
-              if (e.error === 'not-allowed') {
-                toast.error("Click 'Start' or interact with the page to enable audio.");
-              } else {
-                toast.error("Audio playback failed. Please read the question and answer.");
-              }
-            };
-
-            // Ensure voices are loaded (sometimes needed for Chrome)
-            if (window.speechSynthesis.getVoices().length === 0) {
-              window.speechSynthesis.onvoiceschanged = () => {
-                window.speechSynthesis.speak(utterance);
-              };
-            } else {
-              window.speechSynthesis.speak(utterance);
-            }
+            utterance.onend = () => setIsSpeaking(false);
+            window.speechSynthesis.speak(utterance);
           } else {
             setIsSpeaking(false);
-            toast.info("Please read the question and provide your answer.");
           }
         };
 
-        // Wrap play in a user-interaction friendly way
         try {
           await audio.play();
         } catch (playError) {
-          console.warn("Autoplay or format error:", playError);
-          // Trigger onerror manually to fall back
           if (audio.onerror) audio.onerror(playError);
         }
-
       } catch (error) {
-        console.error("General audio setup error:", error);
         setIsSpeaking(false);
       }
     };
@@ -184,12 +166,11 @@ const InterviewPage = () => {
       }
       window.speechSynthesis.cancel();
     };
-  }, [currentQuestionIndex, interview, isSetupComplete, sessionId]);
+  }, [currentQuestionIndex, interview, isSetupComplete, sessionId, API_BASE]);
 
   // Timer countdown
   useEffect(() => {
     if (!isSetupComplete) return;
-
     const timer = setInterval(() => {
       setRemainingTime(prev => {
         if (prev <= 1) {
@@ -200,14 +181,8 @@ const InterviewPage = () => {
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(timer);
   }, [isSetupComplete]);
-
-  const getSupportedMimeType = () => {
-    const types = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/mpeg', 'audio/webm'];
-    return types.find(type => MediaRecorder.isTypeSupported(type));
-  };
 
   useEffect(() => {
     loadInterview();
@@ -229,14 +204,8 @@ const InterviewPage = () => {
     try {
       const response = await axios.get(`${API_BASE}/interview/status/${sessionId}`);
       if (response.data.success) {
-        console.log('📋 Interview loaded:', response.data.interview);
-        console.log('📝 Total questions:', response.data.interview.questions.length);
-        console.log('🎯 First question:', response.data.interview.questions[0]);
-
         setInterview(response.data.interview);
         setCurrentQuestionIndex(response.data.interview.currentQuestion || 0);
-
-        // Initialize attempted questions
         const answered = new Set();
         response.data.interview.questions.forEach((q, idx) => {
           if (q.answer && q.answer !== 'not attempted') {
@@ -254,31 +223,33 @@ const InterviewPage = () => {
   const navigateToQuestion = (index) => {
     if (!interview || index < 0 || index >= interview.questions.length) return;
     setCurrentQuestionIndex(index);
-    // Reset editor content
-    setCodeContent('// Write your code here...');
-    setNotepadContent('');
+    const q = interview.questions[index];
+    if (q.type === 'code') {
+      setEditorMode('code');
+      setCodeContent(getLanguageByValue(selectedLanguage).boilerplate);
+    } else {
+      setEditorMode('notepad');
+      setNotepadContent('');
+    }
     setShowHintConfirm(false);
+    setHintsRevealed(0);
+    setHintsUsedCount(0);
+    setHintConfirmLevel(0);
     setHintVisible(false);
     setHintUsed(false);
+    setCodeOutput(null);
   };
 
-  // Audio Recording Logic
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
-
       mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
-
       mediaRecorderRef.current.start();
-      console.log('🎙️ Recording started');
     } catch (error) {
-      console.error('Error starting recording:', error);
       toast.error("Could not access microphone.");
     }
   };
@@ -291,22 +262,17 @@ const InterviewPage = () => {
           resolve(audioBlob);
         };
         mediaRecorderRef.current.stop();
-        console.log('⏹️ Recording stopped');
       } else {
         resolve(null);
       }
     });
   };
 
-  // Manage Recording State based on AI Speaking status
   useEffect(() => {
     if (!isSetupComplete || !interview) return;
-
     if (!isSpeaking) {
-      // AI finished speaking, start recording user answer
       startRecording();
     } else {
-      // AI is speaking, ensure recording is stopped (if any)
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
@@ -315,19 +281,18 @@ const InterviewPage = () => {
 
   const submitAnswer = async () => {
     if (isSubmitting || !interview) return;
-
-    // Stop recording first to get the audio blob
     const audioBlob = await stopRecording();
 
-    // Verify audio (unless it's a code/text answer)
-    if ((!audioBlob || audioBlob.size === 0) && editorMode === 'notepad' && !notepadContent && !codeContent) {
-      toast.error("No audio recorded. Please speak your answer.");
-      // Restart recording since we failed to submit
+    // Check if any answer is provided
+    const hasText = notepadContent.trim().length > 0;
+    const hasCode = codeContent.trim().length > 0;
+    const hasAudio = audioBlob && audioBlob.size > 0;
+
+    if (!hasAudio && !hasText && !hasCode) {
+      toast.error("Please provide an answer (speak or write).");
       startRecording();
       return;
     }
-
-    const currentQ = interview.questions[currentQuestionIndex];
 
     setIsSubmitting(true);
     toast.loading("Submitting answer...", { id: 'submit' });
@@ -345,9 +310,8 @@ const InterviewPage = () => {
         formData.append("textAnswer", notepadContent);
       }
 
-      formData.append("hintUsed", hintUsed);
+      formData.append("hintsUsed", hintsUsedCount);
 
-      // Attach actual recorded audio or empty fallback if code-only
       if (audioBlob) {
         formData.append("audio", audioBlob, "answer.webm");
       } else {
@@ -355,24 +319,15 @@ const InterviewPage = () => {
         formData.append("audio", emptyBlob, "answer.webm");
       }
 
-      const response = await axios.post(
-        `${API_BASE}/interview/submit-answer`,
-        formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          timeout: 45000 // Increased timeout for audio upload
-        }
-      );
+      const response = await axios.post(`${API_BASE}/interview/submit-answer`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 45000
+      });
 
       toast.dismiss('submit');
-
       if (response.data.success) {
-        // Mark question as attempted
         setAttemptedQuestions(prev => new Set([...prev, currentQuestionIndex]));
-
         toast.success("Answer submitted!");
-
-        // Move to next question if available
         if (currentQuestionIndex < interview.questions.length - 1) {
           navigateToQuestion(currentQuestionIndex + 1);
         } else {
@@ -396,29 +351,60 @@ const InterviewPage = () => {
     }
   };
 
+  const handleEditorDidMount = (editor, monaco) => {
+    setTimeout(() => {
+      editor.layout();
+    }, 100);
+  };
+
   const endInterview = async () => {
     try {
       if (activeAudioRef.current) {
         activeAudioRef.current.pause();
         activeAudioRef.current = null;
       }
-
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         mediaRecorderRef.current.stop();
       }
-
       if (webcamRef.current && webcamRef.current.video && webcamRef.current.video.srcObject) {
         webcamRef.current.video.srcObject.getTracks().forEach(track => track.stop());
       }
-
       toast.loading("Ending interview...", { id: 'end-interview' });
       await axios.post(`${API_BASE}/interview/end/${sessionId}`);
       toast.success("Interview ended", { id: 'end-interview' });
-
       navigate(`/results/${sessionId}`);
     } catch (error) {
       console.error("Error ending interview:", error);
       toast.error("Failed to end interview", { id: 'end-interview' });
+    }
+  };
+
+  const handleRunCode = async () => {
+    if (!sessionId || !codeContent) return;
+
+    setIsRunningCode(true);
+    setCodeOutput({ status: { description: 'Executing...' }, stdout: '', stderr: '', compile_output: '' });
+
+    try {
+      const lang = getLanguageByValue(selectedLanguage);
+      const response = await axios.post(`${API_BASE}/interview/execute`, {
+        sourceCode: codeContent,
+        languageId: lang?.id || 63,
+        stdin: ""
+      });
+
+      if (response.data.success) {
+        setCodeOutput(response.data.result);
+        toast.success("Code executed successfully");
+      } else {
+        throw new Error(response.data.error || "Execution failed");
+      }
+    } catch (err) {
+      console.error("Code execution error:", err);
+      setCodeOutput({ error: err.message });
+      toast.error("Code execution failed");
+    } finally {
+      setIsRunningCode(false);
     }
   };
 
@@ -454,90 +440,22 @@ const InterviewPage = () => {
         </div>
       </header>
 
-      {/* Request Media Permissions First */}
       <MediaPermissionGate onPermissionsGranted={() => setMediaPermissionsGranted(true)}>
-        {/* Show Guidelines After Permissions */}
         {!guidelinesAccepted && (
           <PreInterviewGuidelines onAccept={() => setGuidelinesAccepted(true)} />
         )}
 
-        {guidelinesAccepted && isSetupMode ? (
-          <div className="setup-overlay">
-            <div className="setup-card">
-              <div className="setup-header">
-                <div className="setup-icon"><FiSettings /></div>
-                <h2>System Check</h2>
-                <p>Ensure your face is centered and microphone levels are active.</p>
-              </div>
-
-              <div className="setup-video-wrapper">
-                <Webcam
-                  ref={webcamRef}
-                  audio={false}
-                  mirrored={true}
-                  className="webcam-feed"
-                  videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
-                />
-                <MediaAnalyzer
-                  webcamRef={webcamRef}
-                  onMetricsUpdate={setVideoMetrics}
-                  onAudioLevel={setAudioLevel}
-                  onCalibrationComplete={() => setIsCalibrated(true)}
-                />
-              </div>
-
-              <div className="setup-controls">
-                <div className="audio-test">
-                  <div className="audio-label">Microphone Sensitivity</div>
-                  <div className="audio-meter">
-                    <div className="audio-fill" style={{ width: `${audioLevel * 100}%` }} />
-                  </div>
+        {guidelinesAccepted && (
+          isSetupMode ? (
+            <div className="setup-overlay">
+              <div className="setup-card">
+                <div className="setup-header">
+                  <div className="setup-icon"><FiSettings /></div>
+                  <h2>System Check</h2>
+                  <p>Ensure your face is centered and microphone levels are active.</p>
                 </div>
-                <button
-                  className={`btn-start-session ${isCalibrated ? 'ready' : ''}`}
-                  disabled={!isCalibrated}
-                  onClick={() => {
-                    if (document.documentElement.requestFullscreen) {
-                      document.documentElement.requestFullscreen().catch(err => {
-                        console.warn("Fullscreen request failed:", err);
-                      });
-                    }
-                    setIsSetupComplete(true);
-                    interviewStartTimeRef.current = Date.now();
-                  }}
-                  style={{
-                    padding: '16px',
-                    fontSize: '18px',
-                    fontWeight: 'bold',
-                    background: isCalibrated ? '#4CAF50' : '#444',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: isCalibrated ? 'pointer' : 'not-allowed',
-                    opacity: isCalibrated ? 1 : 0.7,
-                    transition: 'all 0.3s'
-                  }}
-                >
-                  {isCalibrated ? <><FiCheck /> Begin Interview</> : "Calibrating AI..."}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <LockdownManager isActive={!isSetupMode} onLockdownViolation={handleLockdownViolation}>
-            <div className="interview-layout">
-              <CheatingDetectionManager
-                interviewId={sessionId}
-                isActive={!isSetupMode}
-                videoMetrics={videoMetrics}
-                audioLevel={audioLevel}
-                webcamRef={webcamRef}
-              />
 
-              {/* Left Panel */}
-              <div className="left-panel">
-                {/* Camera */}
-                <div className="camera-section">
+                <div className="setup-video-wrapper">
                   <Webcam
                     ref={webcamRef}
                     audio={false}
@@ -549,275 +467,333 @@ const InterviewPage = () => {
                     webcamRef={webcamRef}
                     onMetricsUpdate={setVideoMetrics}
                     onAudioLevel={setAudioLevel}
-                    skipCalibration={true}
+                    onCalibrationComplete={() => setIsCalibrated(true)}
                   />
-                  {(videoMetrics.detectedObjects?.length > 0 ||
-                    videoMetrics.gazePattern?.includes('suspicious') ||
-                    videoMetrics.gazePattern === 'extreme_side_gaze' ||
-                    (videoMetrics.posture && videoMetrics.posture.includes('Poor')) ||
-                    videoMetrics.movementScore > 15) && (
-                      <div className={`proctor-alert-new ${videoMetrics.gazePattern === 'extreme_side_gaze' ? 'critical-shake' : ''}`}>
-                        <FiAlertCircle />
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          {videoMetrics.detectedObjects?.length > 0 &&
-                            <span style={{ fontWeight: 'bold', color: '#ff4444' }}>🚫 PROHIBITED: {videoMetrics.detectedObjects.join(', ')}</span>}
-                          {videoMetrics.gazePattern === 'extreme_side_gaze' &&
-                            <span style={{ fontWeight: 'bold', color: '#ffcc00' }}>⚠️ EXTREME RETINA TILT DETECTED!</span>}
-                          {videoMetrics.posture?.includes('Poor') &&
-                            <span>Keep your shoulders straight!</span>}
-                          {videoMetrics.movementScore > 15 &&
-                            <span>Too much movement! Please stay still.</span>}
-                          {(videoMetrics.gazePattern?.includes('suspicious') && videoMetrics.gazePattern !== 'extreme_side_gaze') &&
-                            <span>Please look at the screen.</span>}
-                        </div>
-                      </div>
-                    )}
                 </div>
 
-                {/* Metrics */}
-                <div className="metrics-panel">
-                  <h3>Live AI Proctoring</h3>
-                  <div className="metrics-grid-new">
-                    <div className="metric-new">
-                      <span className="metric-label">Posture</span>
-                      <span className="metric-value" style={{ color: videoMetrics.posture === 'Good' ? '#34d399' : '#f87171' }}>
-                        {videoMetrics.posture || 'Detecting...'}
-                      </span>
+                <div className="setup-controls">
+                  <div className="audio-test">
+                    <div className="audio-label">Microphone Sensitivity</div>
+                    <div className="audio-meter">
+                      <div className="audio-fill" style={{ width: `${audioLevel * 100}%` }} />
                     </div>
-                    <div className="metric-new">
-                      <span className="metric-label">Stability</span>
-                      <span className="metric-value">
-                        {Math.round(100 - (videoMetrics.movementScore || 0))}%
-                      </span>
-                    </div>
-                    <div className="metric-new">
-                      <span className="metric-label">Attention</span>
-                      <span className="metric-value">{Math.round((videoMetrics.attention || 0) * 100)}%</span>
-                    </div>
-                    <div className="metric-new">
-                      <span className="metric-label">Network</span>
-                      <span className="metric-value">{Math.round((videoMetrics.networkQuality || 1) * 100)}%</span>
-                    </div>
+                    {!micPermissionGranted && <div style={{ color: '#ef4444', fontSize: '12px', marginTop: '5px' }}>⚠️ Microphone permission required</div>}
                   </div>
-                </div>
-
-                {/* Question Navigator */}
-                <div className="question-navigator">
-                  <h3>Questions ({currentQuestionIndex + 1}/{interview.questions.length})</h3>
-                  <div className="question-grid">
-                    {interview.questions.map((q, idx) => (
-                      <button
-                        key={idx}
-                        className={`question-block ${idx === currentQuestionIndex ? 'active' : ''} ${attemptedQuestions.has(idx) ? 'attempted' : ''}`}
-                        onClick={() => navigateToQuestion(idx)}
-                      >
-                        {idx + 1}
-                      </button>
-                    ))}
-                  </div>
+                  <button
+                    className={`btn-start-session ${isCalibrated && micPermissionGranted ? 'ready' : ''}`}
+                    disabled={!isCalibrated || !micPermissionGranted}
+                    onClick={() => {
+                      if (document.documentElement.requestFullscreen) {
+                        document.documentElement.requestFullscreen().catch(err => {
+                          console.warn("Fullscreen request failed:", err);
+                        });
+                      }
+                      setIsSetupComplete(true);
+                      interviewStartTimeRef.current = Date.now();
+                    }}
+                    style={{
+                      padding: '16px',
+                      fontSize: '18px',
+                      fontWeight: 'bold',
+                      background: (isCalibrated && micPermissionGranted) ? '#4CAF50' : '#444',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: (isCalibrated && micPermissionGranted) ? 'pointer' : 'not-allowed',
+                      opacity: (isCalibrated && micPermissionGranted) ? 1 : 0.7,
+                      transition: 'all 0.3s'
+                    }}
+                  >
+                    {(isCalibrated && micPermissionGranted) ? <><FiCheck /> Begin Interview</> : "Waiting for Setup..."}
+                  </button>
                 </div>
               </div>
+            </div>
+          ) : (
+            <LockdownManager isActive={!isSetupMode} onLockdownViolation={handleLockdownViolation}>
+              <div className="interview-layout">
+                <CheatingDetectionManager
+                  interviewId={sessionId}
+                  isActive={!isSetupMode}
+                  videoMetrics={videoMetrics}
+                  audioLevel={audioLevel}
+                  webcamRef={webcamRef}
+                />
 
-              {/* Right Panel */}
-              <div className="right-panel">
-                <div className="question-display">
-                  <div className="question-header-new">
-                    <span className="question-number">Question {currentQuestionIndex + 1}/25</span>
-                    <div className="question-badges">
-                      <span className="question-type">{currentQuestion?.type || 'general'}</span>
-                      <span className="question-difficulty">{currentQuestion?.difficulty || 'medium'}</span>
-
-                      {/* Speak Now Indicator */}
-                      <div className={`speaking-indicator ${isSpeaking ? 'speaking' : 'listening'}`} style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        padding: '4px 12px',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        background: isSpeaking ? '#3b82f6' : '#10b981',
-                        color: 'white',
-                        marginLeft: '8px',
-                        transition: 'all 0.3s ease',
-                        opacity: 0.9
-                      }}>
-                        {isSpeaking ? (
-                          <>
-                            <FiVolume2 className="pulse-icon" /> AI Speaking...
-                          </>
-                        ) : (
-                          <>
-                            <FiMic className="pulse-icon" /> Speak Now
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <p className="question-text-new">{currentQuestion?.text}</p>
-
-                  {/* Hint Section */}
-                  {currentQuestion?.type === 'code' && currentQuestion?.hint && (
-                    <div className="hint-section" style={{ marginTop: '15px' }}>
-                      {!hintVisible ? (
-                        <button
-                          onClick={() => setShowHintConfirm(true)}
-                          className="btn-get-hint"
-                          style={{
-                            background: '#f59e0b',
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontSize: '14px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px'
-                          }}
-                        >
-                          <FiAlertCircle /> Get Hint (Penalty Applies)
-                        </button>
-                      ) : (
-                        <div className="hint-display" style={{
-                          background: '#fffbeb',
-                          border: '1px solid #fcd34d',
-                          padding: '12px',
-                          borderRadius: '8px',
-                          color: '#92400e'
-                        }}>
-                          <strong>💡 Hint:</strong> {currentQuestion.hint}
+                <div className="left-panel">
+                  <div className="camera-section">
+                    <Webcam
+                      ref={webcamRef}
+                      audio={false}
+                      mirrored={true}
+                      className="webcam-feed"
+                      videoConstraints={{ width: 640, height: 480, facingMode: "user" }}
+                    />
+                    <MediaAnalyzer
+                      webcamRef={webcamRef}
+                      onMetricsUpdate={setVideoMetrics}
+                      onAudioLevel={setAudioLevel}
+                      skipCalibration={true}
+                    />
+                    {(videoMetrics.detectedObjects?.length > 0 ||
+                      videoMetrics.gazePattern?.includes('suspicious') ||
+                      videoMetrics.gazePattern === 'extreme_side_gaze' ||
+                      (videoMetrics.posture && videoMetrics.posture.includes('Poor')) ||
+                      videoMetrics.movementScore > 15) && (
+                        <div className={`proctor-alert-new ${videoMetrics.gazePattern === 'extreme_side_gaze' ? 'critical-shake' : ''}`}>
+                          <FiAlertCircle />
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            {videoMetrics.detectedObjects?.length > 0 &&
+                              <span style={{ fontWeight: 'bold', color: '#ff4444' }}>🚫 PROHIBITED: {videoMetrics.detectedObjects.join(', ')}</span>}
+                            {videoMetrics.gazePattern === 'extreme_side_gaze' &&
+                              <span style={{ fontWeight: 'bold', color: '#ffcc00' }}>⚠️ EXTREME RETINA TILT DETECTED!</span>}
+                            {videoMetrics.posture?.includes('Poor') &&
+                              <span>Keep your shoulders straight!</span>}
+                            {videoMetrics.movementScore > 15 &&
+                              <span>Too much movement! Please stay still.</span>}
+                            {(videoMetrics.gazePattern?.includes('suspicious') && videoMetrics.gazePattern !== 'extreme_side_gaze') &&
+                              <span>Please look at the screen.</span>}
+                          </div>
                         </div>
                       )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Editor Mode Toggle */}
-                <div className="editor-mode-toggle">
-                  <button
-                    className={`mode-btn ${editorMode === 'notepad' ? 'active' : ''}`}
-                    onClick={() => setEditorMode('notepad')}
-                  >
-                    <FiFileText /> Notepad
-                  </button>
-                  <button
-                    className={`mode-btn ${editorMode === 'code' ? 'active' : ''}`}
-                    onClick={() => setEditorMode('code')}
-                  >
-                    <FiCode /> Code Editor
-                  </button>
-                </div>
-
-                {/* Editor Area */}
-                {editorMode === 'notepad' ? (
-                  <div className="notepad-editor">
-                    <textarea
-                      value={notepadContent}
-                      onChange={(e) => setNotepadContent(e.target.value)}
-                      placeholder="Write your answer here... (for email writing, paragraph, explanation, etc.)"
-                      className="notepad-textarea"
-                    />
                   </div>
-                ) : (
-                  <div className="code-editor-area">
-                    <div className="code-editor-header">
-                      <select
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="language-selector"
-                      >
-                        <option value="javascript">JavaScript</option>
-                        <option value="python">Python</option>
-                        <option value="java">Java</option>
-                      </select>
+
+                  <div className="metrics-panel">
+                    <h3>Live AI Proctoring</h3>
+                    <div className="metrics-grid-new">
+                      <div className="metric-new">
+                        <span className="metric-label">Posture</span>
+                        <span className="metric-value" style={{ color: videoMetrics.posture === 'Good' ? '#34d399' : '#f87171' }}>
+                          {videoMetrics.posture || 'Detecting...'}
+                        </span>
+                      </div>
+                      <div className="metric-new">
+                        <span className="metric-label">Stability</span>
+                        <span className="metric-value">
+                          {Math.round(100 - (videoMetrics.movementScore || 0))}%
+                        </span>
+                      </div>
+                      <div className="metric-new">
+                        <span className="metric-label">Attention</span>
+                        <span className="metric-value">{Math.round((videoMetrics.attention || 0) * 100)}%</span>
+                      </div>
+                      <div className="metric-new">
+                        <span className="metric-label">Network</span>
+                        <span className="metric-value">{Math.round((videoMetrics.networkQuality || 1) * 100)}%</span>
+                      </div>
                     </div>
-                    <Editor
-                      value={codeContent}
-                      onValueChange={code => setCodeContent(code)}
-                      highlight={code => {
-                        const lang = languages[selectedLanguage] || languages.javascript;
-                        return highlight(code, lang);
-                      }}
-                      padding={20}
-                      className="code-editor-main"
-                      style={{
-                        minHeight: '400px',
-                        fontSize: '14px',
-                        fontFamily: '"Fira Code", "Courier New", monospace',
-                        background: '#1e1e1e',
-                        color: '#d4d4d4'
-                      }}
-                    />
+                  </div>
+
+                  <div className="question-navigator">
+                    <h3>Questions ({currentQuestionIndex + 1}/{interview.questions.length})</h3>
+                    <div className="question-grid">
+                      {interview.questions.map((q, idx) => (
+                        <button
+                          key={idx}
+                          className={`question-block ${idx === currentQuestionIndex ? 'active' : ''} ${attemptedQuestions.has(idx) ? 'attempted' : ''}`}
+                          onClick={() => navigateToQuestion(idx)}
+                        >
+                          {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="right-panel" style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 140px)' }}>
+                  <div className="question-display" style={{ flex: '0 0 auto', maxHeight: '40vh', overflowY: 'auto', marginBottom: '10px' }}>
+                    <div className="question-header-new">
+                      <span className="question-number">Question {currentQuestionIndex + 1}/{interview.questions.length}</span>
+                      <div className="question-badges">
+                        <span className="question-type">{currentQuestion?.type || 'general'}</span>
+                        <span className="question-difficulty">{currentQuestion?.difficulty || 'medium'}</span>
+                        <div className={`speaking-indicator ${isSpeaking ? 'speaking' : 'listening'}`} style={{
+                          display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 12px',
+                          borderRadius: '20px', fontSize: '12px', fontWeight: 'bold',
+                          background: isSpeaking ? '#3b82f6' : '#10b981', color: 'white',
+                          marginLeft: '8px', transition: 'all 0.3s ease', opacity: 0.9
+                        }}>
+                          {isSpeaking ? <><FiVolume2 className="pulse-icon" /> AI Speaking...</> : <><FiMic className="pulse-icon" /> Speak Now</>}
+                        </div>
+                      </div>
+                    </div>
+                    <p className="question-text-new">{currentQuestion?.text || currentQuestion?.question}</p>
+
+                    {currentQuestion?.type === 'code' && (
+                      <div className="hint-section" style={{ marginTop: '15px' }}>
+                        {(currentQuestion.hint1 || currentQuestion.hint2) ? (
+                          <>
+                            {hintsRevealed < 1 && currentQuestion.hint1 && (
+                              <button onClick={() => { setHintConfirmLevel(1); setShowHintConfirm(true); }}
+                                className="btn-get-hint" style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <FiAlertCircle /> Get Hint 1 (Small Penalty)
+                              </button>
+                            )}
+                            {hintsRevealed >= 1 && currentQuestion.hint1 && (
+                              <div className="hint-display" style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '12px', borderRadius: '8px', color: '#92400e', marginBottom: '8px' }}>
+                                <strong>💡 Hint 1:</strong> {currentQuestion.hint1}
+                              </div>
+                            )}
+                            {hintsRevealed === 1 && currentQuestion.hint2 && (
+                              <button onClick={() => { setHintConfirmLevel(2); setShowHintConfirm(true); }}
+                                className="btn-get-hint" style={{ background: '#ef4444', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                                <FiAlertCircle /> Get Hint 2 (Large Penalty)
+                              </button>
+                            )}
+                            {hintsRevealed >= 2 && currentQuestion.hint2 && (
+                              <div className="hint-display" style={{ background: '#fef2f2', border: '1px solid #fca5a5', padding: '12px', borderRadius: '8px', color: '#991b1b' }}>
+                                <strong>💡 Hint 2:</strong> {currentQuestion.hint2}
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          currentQuestion.hint && (
+                            <>
+                              {!hintVisible ? (
+                                <button onClick={() => { setHintConfirmLevel(0); setShowHintConfirm(true); }}
+                                  className="btn-get-hint" style={{ background: '#f59e0b', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <FiAlertCircle /> Get Hint (Penalty Applies)
+                                </button>
+                              ) : (
+                                <div className="hint-display" style={{ background: '#fffbeb', border: '1px solid #fcd34d', padding: '12px', borderRadius: '8px', color: '#92400e' }}>
+                                  <strong>💡 Hint:</strong> {currentQuestion.hint}
+                                </div>
+                              )}
+                            </>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="editor-mode-toggle" style={{ marginBottom: '10px' }}>
+                    <button className={`mode-btn ${editorMode === 'notepad' ? 'active' : ''}`} onClick={() => setEditorMode('notepad')}>
+                      <FiFileText /> Notepad
+                    </button>
+                    <button className={`mode-btn ${editorMode === 'code' ? 'active' : ''}`} onClick={() => setEditorMode('code')}>
+                      <FiCode /> Code Editor
+                    </button>
+                  </div>
+
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    {editorMode === 'notepad' ? (
+                      <textarea
+                        value={notepadContent}
+                        onChange={(e) => setNotepadContent(e.target.value)}
+                        placeholder="Write your answer here..."
+                        className="notepad-textarea"
+                        style={{ flex: 1, resize: 'none' }}
+                      />
+                    ) : (
+                      <div className="code-editor-wrapper" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#1e1e1e', borderRadius: '8px', overflow: 'hidden', border: '1px solid #333' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 16px', background: '#1e1e1e', borderBottom: '1px solid #333' }}>
+                          <select
+                            value={selectedLanguage}
+                            onChange={(e) => {
+                              setSelectedLanguage(e.target.value);
+                              const lang = getLanguageByValue(e.target.value);
+                              if (lang) setCodeContent(lang.boilerplate);
+                            }}
+                            className="language-selector" style={{ background: '#2d2d2d', color: '#fff', border: '1px solid #444', padding: '4px 8px', borderRadius: '4px' }}>
+                            {LANGUAGE_OPTIONS.map(lang => <option key={lang.id} value={lang.value}>{lang.name}</option>)}
+                          </select>
+                          <button
+                            onClick={handleRunCode}
+                            disabled={isRunningCode}
+                            className="btn-run-code"
+                            style={{
+                              background: isRunningCode ? '#444' : '#10b981',
+                              color: 'white', border: 'none', padding: '4px 12px',
+                              borderRadius: '4px', cursor: isRunningCode ? 'not-allowed' : 'pointer',
+                              display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 'bold'
+                            }}
+                          >
+                            {isRunningCode ? "Running..." : <><FiCode /> Run Code</>}
+                          </button>
+                        </div>
+                        <div style={{ flex: 1, position: 'relative', minHeight: '200px' }}>
+                          <Editor
+                            height="100%"
+                            language={selectedLanguage}
+                            value={codeContent}
+                            theme="vs-dark"
+                            onMount={handleEditorDidMount}
+                            onChange={value => setCodeContent(value)}
+                            options={{
+                              minimap: { enabled: false },
+                              fontSize: 14,
+                              automaticLayout: true,
+                              wordWrap: 'on',
+                              scrollBeyondLastLine: false
+                            }}
+                          />
+                        </div>
+                        {codeOutput && (
+                          <div className="code-output" style={{
+                            height: '150px', background: '#000', color: '#fff',
+                            padding: '10px', fontFamily: 'monospace', fontSize: '13px',
+                            overflowY: 'auto', borderTop: '2px solid #333'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                              <span style={{ color: '#10b981', fontWeight: 'bold' }}>Output:</span>
+                              <button onClick={() => setCodeOutput(null)} style={{ background: 'transparent', color: '#666', border: 'none', cursor: 'pointer' }}>Clear</button>
+                            </div>
+                            {codeOutput.error ? (
+                              <pre style={{ color: '#ef4444' }}>{codeOutput.error}</pre>
+                            ) : (
+                              <>
+                                {codeOutput.stdout && <pre>{codeOutput.stdout}</pre>}
+                                {codeOutput.stderr && <pre style={{ color: '#ef4444' }}>{codeOutput.stderr}</pre>}
+                                {codeOutput.compile_output && <pre style={{ color: '#f59e0b' }}>{codeOutput.compile_output}</pre>}
+                                {codeOutput.status?.description && (
+                                  <div style={{ marginTop: '5px', color: '#888', fontSize: '11px' }}>
+                                    Status: {codeOutput.status.description} | Time: {codeOutput.time}s | Memory: {codeOutput.memory}KB
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="action-buttons" style={{ marginTop: '10px' }}>
+                    <button className="btn-skip" onClick={skipQuestion} disabled={isSubmitting}>Skip Question</button>
+                    <button className="btn-submit" onClick={submitAnswer} disabled={isSubmitting}>{isSubmitting ? 'Submitting...' : 'Submit Answer'}</button>
+                    <button className="btn-end" onClick={endInterview}>End Interview</button>
+                  </div>
+                </div>
+
+                {showHintConfirm && (
+                  <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                    <div className="modal-content" style={{ background: '#1e1e1e', padding: '24px', borderRadius: '12px', maxWidth: '400px', width: '90%', textAlign: 'center', border: '1px solid #333' }}>
+                      <div style={{ color: '#f59e0b', fontSize: '48px', marginBottom: '16px' }}><FiAlertCircle /></div>
+                      <h3 style={{ color: 'white', marginBottom: '12px' }}>{hintConfirmLevel > 0 ? `Use Hint ${hintConfirmLevel}?` : 'Use Hint?'}</h3>
+                      <p style={{ color: '#ccc', marginBottom: '24px' }}>
+                        {hintConfirmLevel === 1 && "Using Hint 1 will apply a small score penalty (-10%)."}
+                        {hintConfirmLevel === 2 && "Using Hint 2 will apply a larger score penalty (-25%)."}
+                        {hintConfirmLevel === 0 && "Using a hint will result in a score deduction for this question."}
+                        <br />Are you sure you want to proceed?
+                      </p>
+                      <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                        <button onClick={() => { setShowHintConfirm(false); setHintConfirmLevel(0); }}
+                          style={{ padding: '10px 20px', borderRadius: '6px', background: '#333', color: 'white', border: 'none', cursor: 'pointer' }}>Cancel</button>
+                        <button onClick={() => {
+                          if (hintConfirmLevel > 0) { setHintsRevealed(hintConfirmLevel); setHintsUsedCount(hintConfirmLevel); }
+                          else { setHintVisible(true); setHintUsed(true); setHintsUsedCount(prev => prev + 1); }
+                          setShowHintConfirm(false); setHintConfirmLevel(0);
+                        }} style={{ padding: '10px 20px', borderRadius: '6px', background: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>Yes, Show Hint</button>
+                      </div>
+                    </div>
                   </div>
                 )}
-
-                {/* Action Buttons */}
-                <div className="action-buttons">
-                  <button className="btn-skip" onClick={skipQuestion} disabled={isSubmitting}>
-                    Skip Question
-                  </button>
-                  <button className="btn-submit" onClick={submitAnswer} disabled={isSubmitting}>
-                    {isSubmitting ? 'Submitting...' : 'Submit Answer'}
-                  </button>
-                  <button className="btn-end" onClick={endInterview}>
-                    End Interview
-                  </button>
-                </div>
               </div>
-              {/* Hint Confirmation Modal */}
-              {showHintConfirm && (
-                <div className="modal-overlay" style={{
-                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-                  background: 'rgba(0,0,0,0.7)', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', zIndex: 1000
-                }}>
-                  <div className="modal-content" style={{
-                    background: '#1e1e1e', padding: '24px', borderRadius: '12px',
-                    maxWidth: '400px', width: '90%', textAlign: 'center',
-                    border: '1px solid #333'
-                  }}>
-                    <div style={{ color: '#f59e0b', fontSize: '48px', marginBottom: '16px' }}>
-                      <FiAlertCircle />
-                    </div>
-                    <h3 style={{ color: 'white', marginBottom: '12px' }}>Use Hint?</h3>
-                    <p style={{ color: '#ccc', marginBottom: '24px' }}>
-                      Using a hint will result in a <strong>score deduction</strong> for this question.
-                      Are you sure you want to proceed?
-                    </p>
-                    <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                      <button
-                        onClick={() => setShowHintConfirm(false)}
-                        style={{
-                          padding: '10px 20px', borderRadius: '6px',
-                          background: '#333', color: 'white', border: 'none', cursor: 'pointer'
-                        }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() => {
-                          setHintVisible(true);
-                          setHintUsed(true);
-                          setShowHintConfirm(false);
-                        }}
-                        style={{
-                          padding: '10px 20px', borderRadius: '6px',
-                          background: '#f59e0b', color: 'white', border: 'none', cursor: 'pointer',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        Yes, Show Hint
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </LockdownManager>
+            </LockdownManager>
+          )
         )}
       </MediaPermissionGate>
-    </div >
+    </div>
   );
 };
 

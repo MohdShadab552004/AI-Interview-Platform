@@ -10,7 +10,7 @@ let interviewService;
 
 // Extract the processing logic so it can be called directly
 const processJob = async (data) => {
-    const { interviewId, questionIndex, audioPath, audioMimeType, videoMetrics } = data;
+    const { interviewId, questionIndex, audioPath, audioMimeType, videoMetrics, hintsUsed, textAnswer, codeAnswer } = data;
 
     if (!interviewService) {
         interviewService = require('../services/interviewService');
@@ -75,9 +75,14 @@ const processJob = async (data) => {
         console.log(`[Worker] Evaluating answer...`);
         let aiEvaluation;
 
-        // processing failed transcription
-        if (transcription.text === "Transcription failed" || transcription.text === "No audio provided") {
-            console.warn("[Worker] Skipping AI evaluation due to missing transcription.");
+        // Determine the effective answer text
+        const effectiveAnswer = (transcription.text && transcription.text !== "Transcription failed" && transcription.text !== "No audio provided")
+            ? transcription.text
+            : (textAnswer || codeAnswer || "No answer provided");
+
+        // Processing failed transcription/missing answer
+        if (effectiveAnswer === "No answer provided" && (transcription.text === "Transcription failed" || transcription.text === "No audio provided")) {
+            console.warn("[Worker] Skipping AI evaluation due to missing transcription and no text/code answer.");
             aiEvaluation = {
                 technicalAccuracy: 0,
                 communicationSkills: 0,
@@ -86,13 +91,22 @@ const processJob = async (data) => {
                 feedback: "Audio was not captured clearly or transcription failed. Please check your microphone."
             };
         } else {
-            aiEvaluation = await aiService.evaluateAnswer({
+            const result = await aiService.evaluateAnswer({
                 question: question.text,
-                answer: transcription.text || textAnswer || "No answer provided",
+                answer: effectiveAnswer,
                 voiceMetrics: voiceAnalysis,
                 videoMetrics,
-                hintUsed: question.hintUsed
+                hintsUsed: hintsUsed // Using consistency with HEAD
             });
+            aiEvaluation = result.evaluation;
+
+            // Update token usage
+            if (result.usage) {
+                if (!interview.tokenUsage) interview.tokenUsage = { total_tokens: 0 };
+                interview.tokenUsage.total_tokens = (interview.tokenUsage.total_tokens || 0) + (result.usage.total_tokens || 0);
+                interview.tokenUsage.prompt_tokens = (interview.tokenUsage.prompt_tokens || 0) + (result.usage.prompt_tokens || 0);
+                interview.tokenUsage.completion_tokens = (interview.tokenUsage.completion_tokens || 0) + (result.usage.completion_tokens || 0);
+            }
         }
         console.log(`[Worker] Evaluation score: ${aiEvaluation.overallScore}`);
 
@@ -107,7 +121,16 @@ const processJob = async (data) => {
         const allAnswered = interview.questions.every(q => q.transcription || q.answer);
         if (allAnswered && interview.status === 'completed' && !interview.finalEvaluation) {
             console.log(`[Worker] All questions analyzed. Generating final report for ${interviewId}`);
-            interview.finalEvaluation = await interviewService.generateFinalEvaluation(interview);
+            const finalResult = await interviewService.generateFinalEvaluation(interview);
+            interview.finalEvaluation = finalResult.report;
+
+            // Update token usage from final report
+            if (finalResult.usage) {
+                if (!interview.tokenUsage) interview.tokenUsage = { total_tokens: 0 };
+                interview.tokenUsage.total_tokens = (interview.tokenUsage.total_tokens || 0) + (finalResult.usage.total_tokens || 0);
+                interview.tokenUsage.prompt_tokens = (interview.tokenUsage.prompt_tokens || 0) + (finalResult.usage.prompt_tokens || 0);
+                interview.tokenUsage.completion_tokens = (interview.tokenUsage.completion_tokens || 0) + (finalResult.usage.completion_tokens || 0);
+            }
         }
 
         // Save back to storage

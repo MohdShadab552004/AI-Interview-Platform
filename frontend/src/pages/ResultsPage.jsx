@@ -180,6 +180,20 @@ const ResultsPage = () => {
                 <p style={{ fontSize: '1rem', color: 'white' }}>{report.weaknesses?.[0]}</p>
               </div>
             </div>
+
+            {/* Token Usage Display */}
+            {interview.tokenUsage && (
+              <div className="qa-metric" style={{ textAlign: 'left', background: 'rgba(59, 130, 246, 0.1)', border: '1px solid #3b82f6' }}>
+                <FiTrendingUp size={24} color="#3b82f6" style={{ marginBottom: '1rem' }} />
+                <label style={{ color: '#93c5fd' }}>AI Token Usage</label>
+                <p style={{ fontSize: '1.2rem', color: 'white', fontWeight: 'bold' }}>
+                  {(interview.tokenUsage.total_tokens || 0).toLocaleString()}
+                </p>
+                <span style={{ fontSize: '0.8rem', color: '#93c5fd', opacity: 0.8 }}>
+                  Approx. Cost: ${((interview.tokenUsage.total_tokens || 0) * 0.000001).toFixed(6)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Cheating Detection Report */}

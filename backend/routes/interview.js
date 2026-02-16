@@ -49,10 +49,11 @@ router.post('/start', upload.single('cv'), async (req, res) => {
 // Submit answer (audio + metrics)
 router.post('/submit-answer', upload.single('audio'), async (req, res) => {
   try {
-    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer, skipped, hintUsed } = req.body;
+    const { interviewId, questionIndex, videoMetrics, textAnswer, codeAnswer, language, skipped, hintsUsed } = req.body;
     console.log('Interview ID:', interviewId);
     console.log('Question Index:', questionIndex);
     console.log('Skipped:', skipped);
+    console.log('Hints Used:', hintsUsed);
 
     const audioFile = req.file;
 
@@ -71,7 +72,8 @@ router.post('/submit-answer', upload.single('audio'), async (req, res) => {
       videoMetrics: JSON.parse(videoMetrics || '{}'),
       textAnswer,
       codeAnswer,
-      hintUsed
+      language,
+      hintsUsed: parseInt(hintsUsed || 0)
     });
 
     res.json({
@@ -178,13 +180,39 @@ router.get('/:interviewId/question/:questionIndex/audio', async (req, res) => {
     }
 
     // Determine content type (could be MP3 or WAV depending on source)
-    // Defaulting to audio/mpeg for wide compatibility, but if it's WAV buffer it might be audio/wav
-    // Hugging Face usually returns MP3 or WAV. Browser <audio> handles both well.
     res.set('Content-Type', 'audio/mpeg');
     res.send(audioBuffer);
   } catch (error) {
     console.error('Error serving audio:', error);
     res.status(500).json({ success: false, error: 'Failed to serve audio' });
+  }
+});
+
+// Execute code using Judge0
+router.post('/execute', async (req, res) => {
+  try {
+    const { sourceCode, languageId, stdin } = req.body;
+
+    if (!sourceCode || !languageId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing sourceCode or languageId'
+      });
+    }
+
+    const judge0Service = require('../services/judge0Service');
+    const result = await judge0Service.executeCode(sourceCode, languageId, stdin);
+
+    res.json({
+      success: true,
+      result
+    });
+  } catch (error) {
+    console.error('Error executing code:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to execute code'
+    });
   }
 });
 
