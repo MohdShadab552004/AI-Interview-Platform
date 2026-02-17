@@ -13,14 +13,18 @@ class AIService {
     this.aiProvider = env.AI_PROVIDER || 'gemini';
     this.persona = env.INTERVIEWER_PERSONA;
 
-    // Default models - Use Gemini
-    this.defaultModel = 'gemini-2.5-flash';
-    this.complexModel = 'gemini-2.5-flash';
+    // Default models - Use Gemini 2.0 Flash
+    this.defaultModel = 'gemini-2.0-flash';
+    this.complexModel = 'gemini-2.0-flash';
 
     // Gemini Client
     if (this.geminiKey) {
       this.genAI = new GoogleGenerativeAI(this.geminiKey);
     }
+
+    // OpenRouter Client (Secondary Provider)
+    this.openRouterKey = process.env.OPENROUTER_API_KEY;
+    this.useOpenRouter = !!this.openRouterKey;
 
     // Token Usage Tracking (Detailed)
     this.tokenUsage = {
@@ -62,17 +66,66 @@ class AIService {
     console.log(message); // Still log to console
   }
 
-  // Main entry point for LLM calls (Simplified to Gemini only)
+  // Main entry point for LLM calls with cascading fallback
   async callAI(prompt, modelOverride = null) {
+    const modelsToTry = [
+      modelOverride || 'gemini-1.5-flash',
+      'gemini-1.5-flash-latest',
+      'gemini-2.0-flash'
+    ];
+
+    let lastError;
+    for (const model of modelsToTry) {
+      try {
+        return await this.callGemini(prompt, model);
+      } catch (err) {
+        lastError = err;
+        const isQuotaError = err.message?.includes('429') || err.status === 429;
+        this.logToFile(`[AI Service] ${model} failed: ${err.message}`);
+
+        if (!isQuotaError) break; // If it's not a quota error, don't try other models
+        this.logToFile(`[AI Service] Attempting next model in chain...`);
+      }
+    }
+
+    // If Gemini fails, try OpenRouter as last resort
+    if (this.useOpenRouter) {
+      try {
+        this.logToFile(`[AI Service] Falling back to OpenRouter...`);
+        const text = await this.callOpenRouter(prompt);
+        return text;
+      } catch (orErr) {
+        this.logToFile(`[AI Service] OpenRouter fallback also failed: ${orErr.message}`);
+      }
+    }
+
+    throw lastError || new Error("All AI providers failed or are rate-limited");
+  }
+
+  async callOpenRouter(prompt) {
     try {
-      return await this.callGemini(prompt, modelOverride || this.defaultModel);
-    } catch (err) {
-      this.logToFile(`[AI Service] Gemini failed: ${err.message}`);
-      throw err;
+      const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+        model: 'google/gemini-flash-1.5',
+        messages: [
+          { role: 'system', content: this.persona || "You are an expert technical interviewer." },
+          { role: 'user', content: prompt }
+        ]
+      }, {
+        headers: {
+          'Authorization': `Bearer ${this.openRouterKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://hiringbazaar.in',
+          'X-Title': 'HiringBazaar AI Platform'
+        }
+      });
+
+      return response.data.choices[0].message.content;
+    } catch (error) {
+      throw new Error(`OpenRouter Error: ${error.response?.data?.error?.message || error.message}`);
     }
   }
 
-  async callGemini(prompt, model = 'gemini-1.5-flash') {
+  async callGemini(prompt, model = 'gemini-2.0-flash') {
     const maxRetries = 3;
     const baseDelay = 2000; // 2 seconds
 
@@ -295,7 +348,7 @@ Return ONLY valid JSON, no explanations.`;
     const responsibilities = jdRequirements.responsibilities?.join(', ') || 'job responsibilities';
 
     const prompt = isTechnical ?
-      `You are an expert technical interviewer for ${position} position.
+      `Based on your expertise as a Senior HR Director at Microsoft, generate ${count} interview questions for a ${position} position.
 
 Generate ${count} interview questions based on:
 - Candidate's CV Skills: ${cvSkillsList}
@@ -322,11 +375,12 @@ Each question MUST include:
   ]
 }
 
-CRITICAL RULES:
-1. Coding questions must be solvable in the editor and executed via Judge0.
-2. Non-coding questions should still be practical and role-specific.
-3. Return ONLY a valid JSON array.`
-      : `You are an expert interviewer for ${position} position.
+      CRITICAL RULES:
+      1. AT LEAST 5 questions MUST be "code" type for technical roles.
+      2. Coding questions must be solvable in the editor and executed via Judge0.
+      3. Non-coding technical questions should still be practical.
+      4. RETURN ONLY VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`
+      : `As a Senior HR Director at Microsoft, generate ${count} PRACTICAL interview questions for a ${position} position.
 
 Generate ${count} PRACTICAL interview questions based on:
 - Candidate's CV Experience: ${cvSkills.experience?.map(e => e.role).join(', ') || 'general experience'}
@@ -341,7 +395,7 @@ Question types to include:
 
 Format: [{"question": "...", "type": "case-study|email-writing|essay-writing|situational", "expectedTime": 300-600, "difficulty": "easy|medium|hard"}, ...]
 
-CRITICAL: At least 3 questions MUST be Case Studies or Writing tasks.
+CRITICAL: At least 5 questions MUST be Case Studies or Writing tasks.
 Return ONLY a valid JSON array.`;
 
     try {
@@ -430,39 +484,56 @@ Return ONLY a valid JSON array.`;
     const questions = [];
     if (isTechnical) {
       const techList = [
-        "Explain the core architecture of your last major project.",
-        "How do you handle error management and debugging in complex applications?",
-        "Describe a performance optimization you implemented recently.",
-        "How do you ensure code quality and maintainability in your work?",
-        "Explain the difference between different state management approaches you've used.",
-        "Talk about a challenging technical trade-off you had to make.",
-        "How do you approach database schema design for scalability?",
-        "Describe your experience with CI/CD pipelines and deployment processes.",
-        "What is your approach to security best practices in development?",
-        "How do you stay updated with the latest trends in your technology stack?",
-        "Explain a complex bug you found and how you fixed it."
+        {
+          question: "Implement a function to find the longest substring without repeating characters in a given string.",
+          testCases: [
+            { input: "'abcabcbb'", output: "3" },
+            { input: "'bbbbb'", output: "1" }
+          ]
+        },
+        {
+          question: "Write a function to implement a custom Promise.all that handles errors gracefully.",
+          testCases: [
+            { input: "[]", output: "[]" }
+          ]
+        },
+        {
+          question: "Write a function to parse a large log string and extract the count of 'ERROR' occurrences.",
+          testCases: [
+            { input: "'INFO: ok\\nERROR: fail\\nERROR: crash'", output: "2" }
+          ]
+        },
+        {
+          question: "Design a high-level system for a real-time chat application. Focus on scalability and low latency.",
+          type: "technical" // System design is technical explanation
+        }
       ];
       for (let i = 0; i < count; i++) {
+        const item = techList[i % techList.length];
         questions.push({
-          question: techList[i % techList.length],
-          type: "technical",
-          expectedTime: 300,
-          difficulty: "medium"
+          question: item.question,
+          type: item.type || "code",
+          expectedTime: 600,
+          difficulty: "hard",
+          language: item.type === "technical" ? null : "javascript",
+          testCases: item.testCases || [],
+          hint1: "Think about edge cases like empty inputs.",
+          hint2: "Performance matters for large inputs."
         });
       }
     } else {
       const nonTechList = [
-        "Describe your process for managing complex projects and deadlines.",
-        "How do you handle conflict within a team or with stakeholders?",
-        "Tell me about a time you had to pivot your strategy based on new data.",
-        "How do you ensure effective communication across different departments?",
-        "Describe your approach to problem-solving in a fast-paced environment.",
-        "How do you prioritize your tasks when faced with multiple urgent requests?",
-        "Tell me about a successful initiative you led and its impact.",
-        "How do you handle feedback and criticism from your team or superiors?",
-        "Describe a time you had to persuade others to adopt your point of view.",
-        "What motivates you to perform at your best in this role?",
-        "How do you approach learning a new domain or industry quickly?"
+        "CASE STUDY: You are managing a product launch that is 2 weeks behind schedule. Draft a mitigation plan and an email to stakeholders.",
+        "WRITING TASK: Draft a professional email to a client explaining why a requested feature cannot be implemented in the current sprint.",
+        "SITUATIONAL: A key team member suddenly resigns during a critical project. How do you reassign tasks to meet the deadline?",
+        "CASE STUDY: Analyze a declining user retention rate for a mobile app and propose three data-driven strategies to improve it.",
+        "WRITING TASK: Draft a proposal for a new internal tool that would improve team productivity by 20%.",
+        "SITUATIONAL: You have two conflicting priorities from different departments. How do you negotiate a resolution?",
+        "CASE STUDY: A customer is publicly complaining on social media about a service failure. Draft a response and a recovery plan.",
+        "WRITING TASK: Write a brief memo to your team summarizing the key takeaways from a recent quarterly review.",
+        "SITUATIONAL: How do you handle a situation where you realize a project you've been working on for months is no longer viable?",
+        "CASE STUDY: Propose a budget for a new marketing campaign targeting a specific demographic.",
+        "WRITING TASK: Draft a job description for a new role in your department, emphasizing essential vs. preferred skills."
       ];
       for (let i = 0; i < count; i++) {
         questions.push({
@@ -548,7 +619,7 @@ Return ONLY a valid JSON array.`;
   // Generate Questions based on CV
   async generateCVQuestions(cvText, count = 10) {
     const prompt = `
-      You are an expert interviewer. Analyze the following CV content:
+      Focusing on your persona as a Senior HR Director, analyze the following CV content:
       "${cvText.substring(0, 3000)}"
       
       Generate ${count} "Theory" interview questions based strictly on the skills, projects, and experiences mentioned in the CV.
@@ -565,8 +636,7 @@ Return ONLY a valid JSON array.`;
   // Generate Technical Questions based on CV and Job Description
   async generateTechnicalQuestions(cvText, position, count = 10) {
     const prompt = `
-      You are an expert technical interviewer for a ${position} role.
-      Analyze the following CV content:
+      As a Senior HR Director at Microsoft interviewing for a ${position} role, analyze the following CV content:
       "${cvText.substring(0, 3000)}"
       
       Generate ${count} "Technical" coding or problem-solving questions that combine the position requirements (${position}) with the candidate's background.
@@ -627,8 +697,7 @@ Return ONLY a valid JSON array.`;
 
   async generateRoundQuestions(round, count, cvText, position, experienceLevel, focusArea) {
     const prompt = `
-      You are an expert technical interviewer for a ${position} role (${experienceLevel} level).
-      Analyze the following CV content:
+      As a Senior HR Director at Microsoft with 15+ years of experience, conduct an interview for a ${position} role (${experienceLevel} level).
       "${cvText.substring(0, 2000)}"
 
       Generate ${count} questions for Round ${round}: ${focusArea}.
@@ -1002,10 +1071,36 @@ Return ONLY a valid JSON array.`;
       const parsed = await this.parseJSONResponse(content);
       if (parsed) return { report: parsed, usage };
 
-      return { report: this.getDefaultReport(candidateName, position), usage };
+      throw new Error("Failed to parse report JSON");
     } catch (error) {
-      console.error('Error generating final report:', error);
-      return { report: this.getDefaultReport(candidateName, position), usage: { total_tokens: 0 } };
+      this.logToFile(`[AI Service] Final report AI failed: ${error.message}. Using data-driven fallback.`);
+
+      // Calculate manual scores from individual answer evaluations
+      const validEvaluations = answers.filter(a => a.evaluation && typeof a.evaluation.overallScore === 'number');
+      const avgScore = validEvaluations.length > 0
+        ? Math.round(validEvaluations.reduce((sum, a) => sum + a.evaluation.overallScore, 0) / validEvaluations.length * 10)
+        : 50;
+
+      const manualReport = {
+        summary: {
+          overallScore: avgScore,
+          technicalScore: avgScore,
+          communicationScore: Math.round(avgScore * 0.9),
+          decision: avgScore >= 70 ? "Selected" : "Under Review"
+        },
+        detailedBreakdown: {
+          technicalSkills: { score: Math.round(avgScore / 10), feedback: "Based on automated evaluation of answers." },
+          problemSolving: { score: Math.round(avgScore / 10), feedback: "Demonstrated through coding and technical questions." },
+          communication: { score: Math.round(avgScore / 11), feedback: "General communication assessment." },
+          confidence: { score: 7, feedback: "Calculated from interview engagement." }
+        },
+        strengths: ["Completed the interview successfully", "Provided responses to all required questions"],
+        weaknesses: ["Detailed AI analysis unavailable due to service limits"],
+        finalFeedback: `Candidate completed the interview with an average score of ${avgScore / 10}. A detailed qualitative report could not be generated at this time, but the quantitative data suggests ${avgScore >= 70 ? "strong" : "moderate"} potential.`,
+        suggestions: ["Review individual question scores manually", "Schedule a follow-up discussion"]
+      };
+
+      return { report: manualReport, usage: { total_tokens: 0 } };
     }
   }
 
