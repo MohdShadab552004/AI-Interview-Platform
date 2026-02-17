@@ -53,14 +53,14 @@ const WebcamMonitor = ({ videoMetrics, isActive, onViolation }) => {
             });
         }
 
-        // 4. Posture Check
-        if (videoMetrics.posture && videoMetrics.posture.includes('Poor')) {
-            onViolation({
-                type: 'poor_posture',
-                details: 'Please maintain a straight posture (Shoulders tilted)',
-                severity: 'medium'
-            });
-        }
+        // 4. Posture Check - REMOVED per user request
+        // if (videoMetrics.posture && videoMetrics.posture.includes('Poor')) {
+        //     onViolation({
+        //         type: 'poor_posture',
+        //         details: 'Please maintain a straight posture (Shoulders tilted)',
+        //         severity: 'medium'
+        //     });
+        // }
 
         // 5. Excessive Movement Detection
         if (videoMetrics.movementScore > 15) { // Threshold for "Excessive"

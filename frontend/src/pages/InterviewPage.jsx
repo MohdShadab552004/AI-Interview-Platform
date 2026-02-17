@@ -538,8 +538,7 @@ const InterviewPage = () => {
                     {(videoMetrics.detectedObjects?.length > 0 ||
                       videoMetrics.gazePattern?.includes('suspicious') ||
                       videoMetrics.gazePattern === 'extreme_side_gaze' ||
-                      (videoMetrics.posture && videoMetrics.posture.includes('Poor')) ||
-                      videoMetrics.movementScore > 15) && (
+                      videoMetrics.movementScore > 20) && (
                         <div className={`proctor-alert-new ${videoMetrics.gazePattern === 'extreme_side_gaze' ? 'critical-shake' : ''}`}>
                           <FiAlertCircle />
                           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -547,9 +546,7 @@ const InterviewPage = () => {
                               <span style={{ fontWeight: 'bold', color: '#ff4444' }}>🚫 PROHIBITED: {videoMetrics.detectedObjects.join(', ')}</span>}
                             {videoMetrics.gazePattern === 'extreme_side_gaze' &&
                               <span style={{ fontWeight: 'bold', color: '#ffcc00' }}>⚠️ EXTREME RETINA TILT DETECTED!</span>}
-                            {videoMetrics.posture?.includes('Poor') &&
-                              <span>Keep your shoulders straight!</span>}
-                            {videoMetrics.movementScore > 15 &&
+                            {videoMetrics.movementScore > 20 &&
                               <span>Too much movement! Please stay still.</span>}
                             {(videoMetrics.gazePattern?.includes('suspicious') && videoMetrics.gazePattern !== 'extreme_side_gaze') &&
                               <span>Please look at the screen.</span>}
@@ -562,9 +559,11 @@ const InterviewPage = () => {
                     <h3>Live AI Proctoring</h3>
                     <div className="metrics-grid-new">
                       <div className="metric-new">
-                        <span className="metric-label">Posture</span>
-                        <span className="metric-value" style={{ color: videoMetrics.posture === 'Good' ? '#34d399' : '#f87171' }}>
-                          {videoMetrics.posture || 'Detecting...'}
+                        <span className="metric-label">Stress Level</span>
+                        <span className="metric-value" style={{
+                          color: (videoMetrics.stress || 0) < 30 ? '#34d399' : (videoMetrics.stress || 0) < 70 ? '#facc15' : '#f87171'
+                        }}>
+                          {Math.round(videoMetrics.stress || 0)}/100
                         </span>
                       </div>
                       <div className="metric-new">

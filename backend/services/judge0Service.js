@@ -22,13 +22,13 @@ class Judge0Service {
             'Content-Type': 'application/json'
         };
 
-        // RapidAPI Headers
-        if (this.apiKey) headers['X-RapidAPI-Key'] = this.apiKey;
-        if (this.apiHost) headers['X-RapidAPI-Host'] = this.apiHost;
+        // RapidAPI Headers (Only if using RapidAPI URL)
+        if (this.apiUrl.includes('rapidapi.com')) {
+            if (this.apiKey) headers['X-RapidAPI-Key'] = this.apiKey;
+            if (this.apiHost) headers['X-RapidAPI-Host'] = this.apiHost;
+        }
 
-        // Local Auth Headers
-        // Note: These header names (X-Auth-Token, X-Auth-User) are examples and can be adjusted
-        // based on the actual authentication mechanism of your Judge0 instance.
+        // Local Auth Headers (Only if utilizing local tokens)
         if (this.authnToken) headers['X-Auth-Token'] = this.authnToken;
         if (this.authzToken) headers['X-Auth-User'] = this.authzToken;
 
