@@ -26,6 +26,10 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
   const objectPersistenceRef = useRef({ objects: [], framesRemaining: 0 });
   const irisStretchRef = useRef({ left: 0.5, right: 0.5 });
 
+  // DeepFace stress/confidence metrics (from Python service)
+  const deepfaceMetricsRef = useRef({ stress: 0, confidence: 0, emotions: {}, dominant: 'neutral', loaded: false });
+  const PYTHON_SERVICE_URL = import.meta.env.VITE_PYTHON_SERVICE_URL || 'http://localhost:5001';
+
   const [calibrationState, setCalibrationState] = React.useState({
     isCalibrating: !skipCalibration,
     progress: skipCalibration ? 100 : 0
@@ -118,8 +122,16 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
             if (netRef.current) {
               try {
                 const predictions = await netRef.current.detect(video);
+                const PROHIBITED_OBJECTS = [
+                  'cell phone', 'laptop', 'remote', 'book',
+                  'tablet', 'keyboard', 'mouse', 'tv', 'monitor'
+                ];
+                // Log all raw predictions for debugging
+                if (predictions.length > 0) {
+                  console.log('[ObjectDetection] Raw predictions:', predictions.map(p => `${p.class}(${(p.score * 100).toFixed(0)}%)`).join(', '));
+                }
                 detectedObjects = predictions
-                  .filter(p => p.class !== 'person' && p.score >= 0.6)
+                  .filter(p => PROHIBITED_OBJECTS.includes(p.class) && p.score >= 0.45)
                   .map(p => p.class);
                 if (detectedObjects.length > 0) {
                   console.log('[ObjectDetection] Detected:', detectedObjects);
@@ -137,6 +149,43 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
                 objects: detectedObjects,
                 framesRemaining: 150
               };
+            }
+
+            // DeepFace Stress Analysis (every ~5 seconds, aligned with object detection)
+            if (frameCountRef.current % 150 === 0) {
+              try {
+                const captureCanvas = document.createElement('canvas');
+                captureCanvas.width = video.videoWidth;
+                captureCanvas.height = video.videoHeight;
+                const captureCtx = captureCanvas.getContext('2d');
+                captureCtx.drawImage(video, 0, 0);
+                const base64Image = captureCanvas.toDataURL('image/jpeg', 0.6);
+
+                fetch(`${PYTHON_SERVICE_URL}/analyze-stress`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ image: base64Image })
+                })
+                  .then(res => res.json())
+                  .then(data => {
+                    if (data.success) {
+                      deepfaceMetricsRef.current = {
+                        stress: data.stress_score,
+                        confidence: data.confidence_score,
+                        emotions: data.emotions,
+                        dominant: data.dominant_emotion,
+                        loaded: true
+                      };
+                      console.log('[DeepFace] Stress:', data.stress_score, 'Confidence:', data.confidence_score, 'Emotion:', data.dominant_emotion);
+                    }
+                  })
+                  .catch(err => {
+                    // Silently fall back to jitter heuristic
+                    console.warn('[DeepFace] Service unavailable, using fallback:', err.message);
+                  });
+              } catch (e) {
+                console.warn('[DeepFace] Frame capture failed:', e.message);
+              }
             }
           }
           frameCountRef.current++;
@@ -382,7 +431,11 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
     const attentionScore = Math.max(0, 1 - deviation * 2);
     const eyeContactScore = attentionScore > 0.7 ? attentionScore : 0;
     const noseDeviation = Math.abs(noseTip.x - faceCenter);
-    const confidenceScore = Math.max(0, 1 - noseDeviation * 3);
+    const fallbackConfidence = Math.max(0, 1 - noseDeviation * 3);
+    // Use DeepFace confidence if loaded (0-100 scale → 0-1), else fallback
+    const confidenceScore = deepfaceMetricsRef.current.loaded
+      ? deepfaceMetricsRef.current.confidence / 100
+      : fallbackConfidence;
 
     // Advanced Gaze & Stress Analysis
 
@@ -400,7 +453,10 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       const avgDist = distances.reduce((a, b) => a + b, 0) / distances.length;
       jitter = Math.min(1, avgDist * 100); // Normalize heuristic
     }
-    const stressScore = jitter; // Simple proxy for "shakiness/nervousness"
+    // Use DeepFace stress if loaded (0-100 scale), else fallback to jitter
+    const stressScore = deepfaceMetricsRef.current.loaded
+      ? deepfaceMetricsRef.current.stress
+      : jitter * 100; // Scale jitter fallback to 0-100
 
     // 2. Smart Gaze Analysis
     // Iris landmarks: Left 468, Right 473
@@ -499,7 +555,9 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
       isLookingAtCenter: isLookingAtCenter,
       gazeDeviation: gazeDeviation,
       detectedObjects: detectedObjects,
-      networkQuality: networkQuality
+      networkQuality: networkQuality,
+      emotions: deepfaceMetricsRef.current.emotions,
+      dominantEmotion: deepfaceMetricsRef.current.dominant
     });
 
     drawFaceUI(ctx, landmarks, attentionScore, { gazeX, gazeY });

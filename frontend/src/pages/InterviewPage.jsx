@@ -567,9 +567,11 @@ const InterviewPage = () => {
                         </span>
                       </div>
                       <div className="metric-new">
-                        <span className="metric-label">Stability</span>
-                        <span className="metric-value">
-                          {Math.round(100 - (videoMetrics.movementScore || 0))}%
+                        <span className="metric-label">Confidence</span>
+                        <span className="metric-value" style={{
+                          color: (videoMetrics.confidence || 0) >= 0.6 ? '#34d399' : (videoMetrics.confidence || 0) >= 0.3 ? '#facc15' : '#f87171'
+                        }}>
+                          {Math.round((videoMetrics.confidence || 0) * 100)}%
                         </span>
                       </div>
                       <div className="metric-new">

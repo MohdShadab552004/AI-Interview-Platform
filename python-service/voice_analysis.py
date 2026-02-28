@@ -339,6 +339,107 @@ def transcribe():
                 print(f"Cleaned up temp file: {temp_file_path}")
             except: pass
 
+
+# DeepFace lazy loader (avoids slow startup)
+deepface_model = None
+
+def get_deepface():
+    global deepface_model
+    if deepface_model is None:
+        try:
+            from deepface import DeepFace
+            deepface_model = DeepFace
+            print("DeepFace loaded successfully")
+        except ImportError as e:
+            print(f"DeepFace not available: {e}")
+    return deepface_model
+
+@app.route('/analyze-stress', methods=['POST'])
+def analyze_stress():
+    """Analyze facial emotions for stress & confidence using DeepFace"""
+    try:
+        data = request.get_json()
+        if not data or 'image' not in data:
+            return jsonify({
+                "success": False,
+                "error": "No image provided"
+            }), 400
+
+        # Decode base64 image
+        import base64
+        image_data = data['image']
+        # Strip data URL prefix if present
+        if ',' in image_data:
+            image_data = image_data.split(',')[1]
+
+        image_bytes = base64.b64decode(image_data)
+        nparr = np.frombuffer(image_bytes, np.uint8)
+
+        import cv2
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return jsonify({
+                "success": False,
+                "error": "Failed to decode image"
+            }), 400
+
+        DeepFace = get_deepface()
+        if DeepFace is None:
+            return jsonify({
+                "success": False,
+                "error": "DeepFace not installed"
+            }), 500
+
+        # Run emotion analysis
+        result = DeepFace.analyze(
+            frame,
+            actions=['emotion'],
+            enforce_detection=False,
+            silent=True
+        )
+
+        # DeepFace returns a list of results (one per face)
+        if isinstance(result, list):
+            result = result[0]
+
+        emotions = result.get('emotion', {})
+        dominant = result.get('dominant_emotion', 'neutral')
+
+        # Stress score: weighted negative emotions (0-100)
+        stress_score = (
+            emotions.get('angry', 0) * 0.30 +
+            emotions.get('fear', 0) * 0.35 +
+            emotions.get('sad', 0) * 0.20 +
+            emotions.get('disgust', 0) * 0.15
+        )
+
+        # Confidence score: weighted positive/neutral emotions (0-100)
+        confidence_score = (
+            emotions.get('neutral', 0) * 0.40 +
+            emotions.get('happy', 0) * 0.40 +
+            emotions.get('surprise', 0) * 0.20
+        )
+
+        return jsonify({
+            "success": True,
+            "stress_score": round(stress_score, 2),
+            "confidence_score": round(confidence_score, 2),
+            "dominant_emotion": dominant,
+            "emotions": {k: round(v, 2) for k, v in emotions.items()}
+        })
+
+    except Exception as e:
+        print(f"DeepFace analysis error: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "stress_score": 0,
+            "confidence_score": 50,
+            "dominant_emotion": "unknown",
+            "emotions": {}
+        }), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5001))
     # Use a different port if 5001 is in use

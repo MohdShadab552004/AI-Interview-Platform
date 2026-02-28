@@ -24,3 +24,7 @@ scipy>=1.11.0
 
 # Utilities
 python-dateutil>=2.8.0
+
+# DeepFace (Emotion Analysis for Stress & Confidence)
+deepface>=0.0.93
+tf-keras
