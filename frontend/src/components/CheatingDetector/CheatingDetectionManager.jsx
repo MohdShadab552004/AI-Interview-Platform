@@ -48,7 +48,14 @@ const CheatingDetectionManager = ({ interviewId, isActive = true, onViolation, v
 
         // Throttle toasts?
         if (violation.severity === 'critical' || violation.severity === 'high') {
-            toast.error(violation.details, { id: violation.type }); // Use ID to prevent duplicates
+            // For prohibited objects, use unique toast id (no dedup) so every detection is visible
+            const toastId = violation.type === 'prohibited_object'
+                ? `prohibited_${Date.now()}`
+                : violation.type;
+            toast.error(violation.details, {
+                id: toastId,
+                duration: violation.type === 'prohibited_object' ? 8000 : 4000
+            });
         }
 
         setViolations(prev => [...prev, newViolation]);

@@ -1,11 +1,11 @@
-[AI Service Started at 2026-02-17T14:25:18.287Z]
-[2026-02-17T14:25:38.285Z] [AI Service] Calling Gemini with model: gemini-1.5-flash (Attempt 1)
-[2026-02-17T14:25:38.286Z] [AI Service] Gemini Error: Cannot read properties of undefined (reading 'getGenerativeModel')
-[2026-02-17T14:25:38.286Z] [AI Service] gemini-1.5-flash failed: Cannot read properties of undefined (reading 'getGenerativeModel')
-[2026-02-17T14:25:38.286Z] [AI Service] Falling back to OpenRouter...
-[2026-02-17T14:25:39.082Z] [AI Service] OpenRouter fallback also failed: OpenRouter Error: No endpoints found for google/gemini-flash-1.5.
-[2026-02-17T14:25:39.587Z] [AI Service] Calling Gemini with model: gemini-1.5-flash (Attempt 1)
-[2026-02-17T14:25:39.587Z] [AI Service] Gemini Error: Cannot read properties of undefined (reading 'getGenerativeModel')
-[2026-02-17T14:25:39.588Z] [AI Service] gemini-1.5-flash failed: Cannot read properties of undefined (reading 'getGenerativeModel')
-[2026-02-17T14:25:39.588Z] [AI Service] Falling back to OpenRouter...
-[2026-02-17T14:25:39.641Z] [AI Service] OpenRouter fallback also failed: OpenRouter Error: No endpoints found for google/gemini-flash-1.5.
+[AI Service Started at 2026-02-28T09:40:13.558Z]
+[2026-02-28T09:40:40.743Z] [AI Service] Calling Gemini with model: gemini-1.5-flash (Attempt 1)
+[2026-02-28T09:40:40.743Z] [AI Service] Gemini Error: Cannot read properties of undefined (reading 'getGenerativeModel')
+[2026-02-28T09:40:40.744Z] [AI Service] gemini-1.5-flash failed: Cannot read properties of undefined (reading 'getGenerativeModel')
+[2026-02-28T09:40:40.744Z] [AI Service] Falling back to OpenRouter...
+[2026-02-28T09:40:41.460Z] [AI Service] OpenRouter fallback also failed: OpenRouter Error: No endpoints found for google/gemini-flash-1.5.
+[2026-02-28T09:40:41.964Z] [AI Service] Calling Gemini with model: gemini-1.5-flash (Attempt 1)
+[2026-02-28T09:40:41.964Z] [AI Service] Gemini Error: Cannot read properties of undefined (reading 'getGenerativeModel')
+[2026-02-28T09:40:41.964Z] [AI Service] gemini-1.5-flash failed: Cannot read properties of undefined (reading 'getGenerativeModel')
+[2026-02-28T09:40:41.964Z] [AI Service] Falling back to OpenRouter...
+[2026-02-28T09:40:41.986Z] [AI Service] OpenRouter fallback also failed: OpenRouter Error: No endpoints found for google/gemini-flash-1.5.

@@ -111,32 +111,35 @@ const MediaAnalyzer = ({ webcamRef, onMetricsUpdate, onAudioLevel, onCalibration
           const fps = 1000 / delta;
           const networkQuality = Math.min(1, Math.max(0, fps / 30)); // 0 to 1 score
 
-          // Object Detection (Throttled: every 30 frames ~ 1 sec)
-          let detectedObjects = [];
-          if (netRef.current && frameCountRef.current % 30 === 0) {
-            try {
-              const predictions = await netRef.current.detect(video);
-              detectedObjects = predictions
-                .filter(p => ['cell phone', 'laptop', 'book', 'paper'].includes(p.class))
-                .map(p => p.class);
-            } catch (e) {
-              console.error("Detection error:", e);
+          // Object Detection (Throttled: every 20 frames ~ 0.67 sec at 30fps)
+          // NOTE: check and update canvas BEFORE incrementing so both conditions align
+          if (frameCountRef.current % 20 === 0) {
+            let detectedObjects = [];
+            if (netRef.current) {
+              try {
+                const predictions = await netRef.current.detect(video);
+                detectedObjects = predictions
+                  .filter(p => p.class !== 'person' && p.score >= 0.6)
+                  .map(p => p.class);
+                if (detectedObjects.length > 0) {
+                  console.log('[ObjectDetection] Detected:', detectedObjects);
+                }
+              } catch (e) {
+                console.error("Detection error:", e);
+              }
             }
-          }
-          frameCountRef.current++;
 
-          // Update object detection results (only on the throttled frame)
-          if (frameCountRef.current % 30 === 0) {
             canvas.detectedObjects = detectedObjects;
 
-            // Persistence Logic
+            // Persistence Logic: keep visible for ~5 seconds (150 frames at 30fps)
             if (detectedObjects.length > 0) {
               objectPersistenceRef.current = {
                 objects: detectedObjects,
-                framesRemaining: 90 // Persistent for ~3 seconds at 30fps
+                framesRemaining: 150
               };
             }
           }
+          frameCountRef.current++;
 
           // Decrement persistence
           if (objectPersistenceRef.current.framesRemaining > 0) {

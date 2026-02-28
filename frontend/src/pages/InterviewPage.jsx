@@ -543,7 +543,7 @@ const InterviewPage = () => {
                           <FiAlertCircle />
                           <div style={{ display: 'flex', flexDirection: 'column' }}>
                             {videoMetrics.detectedObjects?.length > 0 &&
-                              <span style={{ fontWeight: 'bold', color: '#ff4444' }}>🚫 PROHIBITED: {videoMetrics.detectedObjects.join(', ')}</span>}
+                              <span style={{ fontWeight: 'bold', color: '#ff4444' }}>🚫 Object Detected: {videoMetrics.detectedObjects.join(', ')} — No objects allowed!</span>}
                             {videoMetrics.gazePattern === 'extreme_side_gaze' &&
                               <span style={{ fontWeight: 'bold', color: '#ffcc00' }}>⚠️ EXTREME RETINA TILT DETECTED!</span>}
                             {videoMetrics.movementScore > 20 &&

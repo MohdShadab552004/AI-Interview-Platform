@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 const WebcamMonitor = ({ videoMetrics, isActive, onViolation }) => {
     const lastFaceDetectedTimeRef = useRef(Date.now());
     const multipleFaceStartTimeRef = useRef(null);
+    const lastObjectViolationTimeRef = useRef(0); // Throttle for prohibited object toasts
 
     useEffect(() => {
         if (!isActive || !videoMetrics) return;
@@ -43,14 +44,17 @@ const WebcamMonitor = ({ videoMetrics, isActive, onViolation }) => {
             multipleFaceStartTimeRef.current = null;
         }
 
-        // 3. Object Detection (Cell phone, etc.)
+        // 3. Object Detection (ANY object) - throttled to once per 5 seconds
         if (videoMetrics.detectedObjects && videoMetrics.detectedObjects.length > 0) {
-            // Immediate violation for prohibited objects
-            onViolation({
-                type: 'prohibited_object',
-                details: `Detected prohibited object: ${videoMetrics.detectedObjects.join(', ')}`,
-                severity: 'high'
-            });
+            const timeSinceLast = now - lastObjectViolationTimeRef.current;
+            if (timeSinceLast > 5000) { // At most once every 5 seconds
+                lastObjectViolationTimeRef.current = now;
+                onViolation({
+                    type: 'prohibited_object',
+                    details: `⚠️ Object detected near candidate: ${videoMetrics.detectedObjects.join(', ')} — No objects are allowed during the interview`,
+                    severity: 'high'
+                });
+            }
         }
 
         // 4. Posture Check - REMOVED per user request

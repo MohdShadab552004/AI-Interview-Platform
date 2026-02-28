@@ -33,6 +33,7 @@ const PreInterviewGuidelines = ({ onAccept }) => {
                             <li>❌ Do NOT switch tabs or minimize the browser</li>
                             <li>❌ Do NOT use external devices (phones, tablets, second monitors)</li>
                             <li>❌ Do NOT have books, papers, or notes visible</li>
+                            <li>❌ Do NOT have ANY objects (phones, cups, bottles, remotes, etc.) visible on camera — all objects are flagged as violations</li>
                             <li>❌ Do NOT look away from the screen for extended periods</li>
                             <li>❌ Do NOT have multiple people in the room</li>
                             <li>❌ Do NOT use copy/paste or external AI tools</li>
@@ -50,7 +51,7 @@ const PreInterviewGuidelines = ({ onAccept }) => {
                             </div>
                             <div className="ai-feature">
                                 <strong>📱 Object Detection</strong>
-                                <p>AI identifies prohibited items (phones, laptops, books)</p>
+                                <p>AI detects ANY object near the candidate — no objects of any kind are permitted during the interview</p>
                             </div>
                             <div className="ai-feature">
                                 <strong>🧍 Posture Monitoring</strong>
