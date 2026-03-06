@@ -439,10 +439,13 @@ Generate ${count} interview questions strictly based on:
 - Job Responsibilities: ${responsibilities}
 ${experienceBlock}
 ${examplesBlock}
+CRITICAL REQUIREMENT for "experience" questions:
+You MUST read the candidate's CV Skills and Projects provided above. Generate questions STRICTLY about the specific skills/projects mentioned there. If their CV mentions React, ask about React.
+
 Question Distribution:
-- 50% "code" questions: Standard practical Data Structures & Algorithms (DSA) challenges that can be solved in a browser code editor (e.g. Arrays, Strings, basic logic puzzles).
-- 30% "technical" questions: Normal technical concepts and day-to-day practical scenarios.
-- 20% "experience" questions: STRICTLY based on projects and skills explicitly mentioned in the candidate's CV!
+- 50% "code" questions: Very basic, standard practical Data Structures & Algorithms (DSA) challenges that people solve on Leetcode Easy (e.g. Arrays, Strings, loops, basic logic puzzles). These MUST be solvable in a browser code editor.
+- 30% "technical" questions: Day-to-day practical development scenarios. Keep it simple.
+- 20% "experience" questions: Based strictly on projects/skills in CV.
 
 Each question MUST include:
 {
@@ -832,14 +835,17 @@ Return ONLY a valid JSON array.`;
       Generate ${count} NEW, DYNAMIC questions for Round ${round}: ${focusArea}.
       
       CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
-      - If "Fresher", keep ALL questions very fundamental, easy, and practically normal.
+      - If "Fresher", keep ALL questions very fundamental, easy, and practically normal. Ask very basic logic and core concepts.
       - If "1-3 Years", ask standard, normal practical problems and simple optimizations.
       - If "5+ Years", ask about practical system design and scalability.
       Do NOT ask highly theoretical, obscure, or overly complex questions. Keep it normal.
+      
+      CRITICAL REQUIREMENT: For Round 1 and technical questions generally, you MUST base them on the candidate's CV content provided above.
+
       ${examplesBlock}
       Guidelines:
       - Round 1: Specific "How did you..." questions strictly based on the candidate's CV/Resume text provided above. Type: "cv-analysis".
-      - Round 2: Standard practical Data Structures & Algorithms (DSA) "code" challenges (write a function) solvable in an editor for tech roles. For non-tech, "case-study" or "professional-writing".
+      - Round 2: Standard, practical Data Structures & Algorithms (DSA) "code" challenges (write a function) solvable in a simple editor for tech roles (think Leetcode Easy/Medium). For non-tech, "case-study" or "professional-writing".
       - Round 3: "behavioral" or normal practical day-to-day logic.
 
       Specific Types for Tech: "code", "cv-analysis", "technical-problem".
