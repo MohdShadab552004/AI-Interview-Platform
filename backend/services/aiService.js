@@ -22,10 +22,6 @@ class AIService {
       this.genAI = new GoogleGenerativeAI(this.geminiKey);
     }
 
-    // OpenRouter Client (Secondary Provider)
-    this.openRouterKey = process.env.OPENROUTER_API_KEY;
-    this.useOpenRouter = !!this.openRouterKey;
-
     // Token Usage Tracking (Detailed)
     this.tokenUsage = {
       prompt_tokens: 0,
@@ -89,9 +85,9 @@ class AIService {
   // Main entry point for LLM calls with cascading fallback
   async callAI(prompt, modelOverride = null) {
     const modelsToTry = [
-      modelOverride || 'gemini-1.5-flash',
-      'gemini-1.5-flash-latest',
-      'gemini-2.0-flash'
+      modelOverride || 'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-pro'
     ];
 
     let lastError;
@@ -108,44 +104,10 @@ class AIService {
       }
     }
 
-    // If Gemini fails, try OpenRouter as last resort
-    if (this.useOpenRouter) {
-      try {
-        this.logToFile(`[AI Service] Falling back to OpenRouter...`);
-        const text = await this.callOpenRouter(prompt);
-        return text;
-      } catch (orErr) {
-        this.logToFile(`[AI Service] OpenRouter fallback also failed: ${orErr.message}`);
-      }
-    }
-
     throw lastError || new Error("All AI providers failed or are rate-limited");
   }
 
-  async callOpenRouter(prompt) {
-    try {
-      const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-        model: 'google/gemini-flash-1.5',
-        messages: [
-          { role: 'system', content: this.persona || "You are an expert technical interviewer." },
-          { role: 'user', content: prompt }
-        ]
-      }, {
-        headers: {
-          'Authorization': `Bearer ${this.openRouterKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://hiringbazaar.in',
-          'X-Title': 'HiringBazaar AI Platform'
-        }
-      });
-
-      return response.data.choices[0].message.content;
-    } catch (error) {
-      throw new Error(`OpenRouter Error: ${error.response?.data?.error?.message || error.message}`);
-    }
-  }
-
-  async callGemini(prompt, model = 'gemini-2.0-flash') {
+  async callGemini(prompt, model = 'gemini-2.5-flash') {
     const maxRetries = 3;
     const baseDelay = 2000; // 2 seconds
 
