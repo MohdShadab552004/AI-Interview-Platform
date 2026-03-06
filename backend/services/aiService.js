@@ -425,28 +425,28 @@ Return ONLY valid JSON, no explanations.`;
 
     const experienceBlock = `
 CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
-- If "Fresher", keep questions fundamental and scenario-based.
-- If "1-3 Years", ask about past projects, optimizations, and standard architecture.
-- If "5+ Years", ask about system design, scalability trade-offs, leadership, and highly complex systems.
-THE DIFFICULTY MUST SCALE WITH THE EXPERIENCE LEVEL. Generate DYNAMIC questions.`;
+- If "Fresher", keep ALL questions very fundamental, easy, and practically normal.
+- If "1-3 Years", ask standard, normal practical problems and simple optimizations.
+- If "5+ Years", ask about practical system design and scalability.
+Do NOT ask highly theoretical, obscure, or overly complex questions. Keep it normal and directly related to day-to-day work.`;
 
     const prompt = isTechnical ?
-      `Based on your expertise as a Senior HR Director at Microsoft, generate ${count} NEW and DYNAMIC interview questions for a ${position} position.
+      `Based on your expertise as an interviewer, generate ${count} NORMAL and PRACTICAL interview questions for a ${position} position.
 
-Generate ${count} interview questions based on:
+Generate ${count} interview questions strictly based on:
 - Candidate's CV Skills: ${cvSkillsList}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
 ${experienceBlock}
 ${examplesBlock}
 Question Distribution:
-- 50% "code" questions: Detailed coding challenges.
-- 30% "technical" questions: Deep conceptual/system design.
-- 20% "experience" questions: Based on projects in CV.
+- 50% "code" questions: Standard practical Data Structures & Algorithms (DSA) challenges that can be solved in a browser code editor (e.g. Arrays, Strings, basic logic puzzles).
+- 30% "technical" questions: Normal technical concepts and day-to-day practical scenarios.
+- 20% "experience" questions: STRICTLY based on projects and skills explicitly mentioned in the candidate's CV!
 
 Each question MUST include:
 {
-  "question": "Clear, specific question",
+  "question": "Clear, specific practical question",
   "type": "code|technical|experience",
   "expectedTime": 300-900 (in seconds),
   "difficulty": "easy|medium|hard",
@@ -461,8 +461,8 @@ Each question MUST include:
 
       CRITICAL RULES:
       1. AT LEAST 5 questions MUST be "code" type for technical roles.
-      2. Coding questions must be solvable in the editor and executed via Judge0.
-      3. Non-coding technical questions should still be practical.
+      2. "code" questions MUST be solvable practical DSA problems for a code editor.
+      3. Non-coding technical questions should be normal day-to-day practical questions.
       4. RETURN ONLY VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`
       : `As a Senior HR Director at Microsoft, generate ${count} PRACTICAL and DYNAMIC interview questions for a ${position} position.
 
@@ -832,15 +832,15 @@ Return ONLY a valid JSON array.`;
       Generate ${count} NEW, DYNAMIC questions for Round ${round}: ${focusArea}.
       
       CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
-      - If "Fresher", keep questions fundamental and scenario-based.
-      - If "1-3 Years", ask about past projects, optimizations, and standard architecture.
-      - If "5+ Years", ask about system design, scalability trade-offs, leadership, and highly complex systems.
-      THE DIFFICULTY MUST SCALE WITH THE EXPERIENCE LEVEL.
+      - If "Fresher", keep ALL questions very fundamental, easy, and practically normal.
+      - If "1-3 Years", ask standard, normal practical problems and simple optimizations.
+      - If "5+ Years", ask about practical system design and scalability.
+      Do NOT ask highly theoretical, obscure, or overly complex questions. Keep it normal.
       ${examplesBlock}
       Guidelines:
-      - Round 1: Specific "How did you..." questions about projects/claims. Type: "cv-analysis".
-      - Round 2: Strict "code" challenges (write a function) for tech roles. For non-tech, focus on "case-study" or "professional-writing".
-      - Round 3: "behavioral" or "hard-logic".
+      - Round 1: Specific "How did you..." questions strictly based on the candidate's CV/Resume text provided above. Type: "cv-analysis".
+      - Round 2: Standard practical Data Structures & Algorithms (DSA) "code" challenges (write a function) solvable in an editor for tech roles. For non-tech, "case-study" or "professional-writing".
+      - Round 3: "behavioral" or normal practical day-to-day logic.
 
       Specific Types for Tech: "code", "cv-analysis", "technical-problem".
       Specific Types for Non-Tech: "case-study", "email-writing", "essay-writing", "behavioral".

@@ -135,7 +135,9 @@ const InterviewPage = () => {
         audio.onerror = (err) => {
           clearTimeout(safetyTimeout);
           console.warn("Backend audio failed, falling back to Browser TTS:", err);
-          const questionText = interview.questions[currentQuestionIndex]?.text;
+          const currentQ = interview.questions[currentQuestionIndex];
+          const questionText = currentQ?.text || currentQ?.question;
+
           if (questionText) {
             window.speechSynthesis.cancel();
             const utterance = new SpeechSynthesisUtterance(questionText);
