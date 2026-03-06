@@ -40,7 +40,7 @@ class AIService {
     this.tokenLimit = parseInt(process.env.TOKEN_LIMIT_PER_INTERVIEW) || 50000;
     this.enableTokenFallback = process.env.ENABLE_TOKEN_FALLBACK !== 'false';
 
-    // Load Question Bank and Job Profiles
+    // Load Question Bank, Job Profiles, and Role Question Bank
     try {
       const questionBankPath = path.join(__dirname, '../config/question_bank.json');
       const jobProfilesPath = path.join(__dirname, '../config/job_profiles.json');
@@ -53,6 +53,26 @@ class AIService {
       console.error('[AI Service] Failed to load question bank or job profiles:', error.message);
       this.questionBank = null;
       this.jobProfiles = null;
+    }
+
+    // Load Role-Mapped Question Bank (built from CSV/JSON data files)
+    try {
+      const roleQuestionBankPath = path.join(__dirname, '../config/role_question_bank.json');
+      if (fs.existsSync(roleQuestionBankPath)) {
+        this.roleQuestionBank = JSON.parse(fs.readFileSync(roleQuestionBankPath, 'utf8'));
+        const roles = Object.keys(this.roleQuestionBank);
+        const totalQ = roles.reduce((sum, r) => {
+          const rd = this.roleQuestionBank[r];
+          return sum + (rd.technical?.length || 0) + (rd.behavioral?.length || 0) + (rd.general_knowledge?.length || 0);
+        }, 0);
+        console.log(`[AI Service] Role question bank loaded: ${roles.length} roles, ${totalQ} total questions`);
+      } else {
+        console.warn('[AI Service] Role question bank not found. Run: node scripts/build_question_bank.js');
+        this.roleQuestionBank = null;
+      }
+    } catch (error) {
+      console.error('[AI Service] Failed to load role question bank:', error.message);
+      this.roleQuestionBank = null;
     }
 
     this.logFile = path.join(__dirname, '../ai_debug.log');
@@ -261,6 +281,56 @@ class AIService {
     return this.questionBank.fixed_hr_questions.slice(0, count);
   }
 
+  /**
+   * Get questions from the role-mapped question bank.
+   * @param {string} role - Job role (e.g., 'Frontend Developer')
+   * @param {string} type - Question type: 'technical', 'behavioral', 'general_knowledge'
+   * @param {number} count - Number of questions to fetch
+   * @param {string} difficulty - Optional filter: 'easy', 'medium', 'hard'
+   * @returns {Array} Array of question objects
+   */
+  getQuestionsFromBank(role, type = 'technical', count = 10, difficulty = null) {
+    if (!this.roleQuestionBank) return [];
+
+    // Try exact match first, then fuzzy match
+    let roleData = this.roleQuestionBank[role];
+    if (!roleData) {
+      const lowerRole = role.toLowerCase();
+      const matchedKey = Object.keys(this.roleQuestionBank).find(
+        k => k.toLowerCase().includes(lowerRole) || lowerRole.includes(k.toLowerCase())
+      );
+      if (matchedKey) roleData = this.roleQuestionBank[matchedKey];
+    }
+
+    if (!roleData || !roleData[type]) return [];
+
+    let questions = [...roleData[type]];
+
+    // Filter by difficulty if specified
+    if (difficulty) {
+      const filtered = questions.filter(q => q.difficulty === difficulty);
+      if (filtered.length >= count) questions = filtered;
+    }
+
+    // Shuffle and pick
+    for (let i = questions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [questions[i], questions[j]] = [questions[j], questions[i]];
+    }
+
+    return questions.slice(0, count);
+  }
+
+  /**
+   * Get few-shot example questions for enriching AI prompts.
+   * Returns a curated sample from the bank for the given role.
+   */
+  getFewShotExamples(role, count = 5) {
+    const techExamples = this.getQuestionsFromBank(role, 'technical', Math.ceil(count * 0.6));
+    const behavExamples = this.getQuestionsFromBank(role, 'behavioral', Math.floor(count * 0.4));
+    return [...techExamples, ...behavExamples].slice(0, count);
+  }
+
   // Extract skills and experience from CV
   async extractCVSkills(cvText) {
     if (!cvText || cvText.trim() === '') {
@@ -347,6 +417,12 @@ Return ONLY valid JSON, no explanations.`;
     const jdReqsList = jdRequirements.requirements?.join(', ') || 'role requirements';
     const responsibilities = jdRequirements.responsibilities?.join(', ') || 'job responsibilities';
 
+    // Get few-shot examples from the question bank to guide AI generation
+    const examples = this.getFewShotExamples(position, 5);
+    const examplesBlock = examples.length > 0
+      ? `\n\nHere are some example questions for reference (generate NEW questions inspired by these patterns, do NOT copy them):\n${examples.map((e, i) => `${i + 1}. [${e.difficulty}] ${e.question}`).join('\n')}\n`
+      : '';
+
     const prompt = isTechnical ?
       `Based on your expertise as a Senior HR Director at Microsoft, generate ${count} interview questions for a ${position} position.
 
@@ -354,7 +430,7 @@ Generate ${count} interview questions based on:
 - Candidate's CV Skills: ${cvSkillsList}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
-
+${examplesBlock}
 Question Distribution:
 - 50% "code" questions: Detailed coding challenges.
 - 30% "technical" questions: Deep conceptual/system design.
@@ -386,7 +462,7 @@ Generate ${count} PRACTICAL interview questions based on:
 - Candidate's CV Experience: ${cvSkills.experience?.map(e => e.role).join(', ') || 'general experience'}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
-
+${examplesBlock}
 Question types to include:
 - "case-study": A specific workplace scenario requiring a detailed strategy.
 - "email-writing": Draft an email for a specific professional situation.
@@ -476,72 +552,109 @@ Return ONLY a valid JSON array.`;
     }
   }
 
-  // Fallback questions by role category
+  // Fallback questions by role category — uses real questions from the role question bank
   getFallbackQuestionsByRole(position, count) {
     const profile = this.getJobProfile(position);
     const isTechnical = profile && profile.category === 'technical';
 
+    // Try to get real questions from the bank first
+    const bankTechQuestions = this.getQuestionsFromBank(position, 'technical', count);
+    const bankBehavQuestions = this.getQuestionsFromBank(position, 'behavioral', count);
+    const bankGKQuestions = this.getQuestionsFromBank(position, 'general_knowledge', count);
+
     const questions = [];
+
     if (isTechnical) {
-      const techList = [
-        {
-          question: "Implement a function to find the longest substring without repeating characters in a given string.",
-          testCases: [
-            { input: "'abcabcbb'", output: "3" },
-            { input: "'bbbbb'", output: "1" }
-          ]
-        },
-        {
-          question: "Write a function to implement a custom Promise.all that handles errors gracefully.",
-          testCases: [
-            { input: "[]", output: "[]" }
-          ]
-        },
-        {
-          question: "Write a function to parse a large log string and extract the count of 'ERROR' occurrences.",
-          testCases: [
-            { input: "'INFO: ok\\nERROR: fail\\nERROR: crash'", output: "2" }
-          ]
-        },
-        {
-          question: "Design a high-level system for a real-time chat application. Focus on scalability and low latency.",
-          type: "technical" // System design is technical explanation
+      // Use real technical questions from bank if available
+      if (bankTechQuestions.length > 0) {
+        for (let i = 0; i < count; i++) {
+          const bankQ = bankTechQuestions[i % bankTechQuestions.length];
+          questions.push({
+            question: bankQ.question,
+            type: bankQ.type || 'technical',
+            expectedTime: 600,
+            difficulty: bankQ.difficulty || 'medium',
+            language: bankQ.type === 'code' ? 'javascript' : null,
+            testCases: bankQ.testCases || [],
+            hint1: bankQ.hint1 || 'Think about edge cases and the core concept.',
+            hint2: bankQ.hint2 || 'Break the problem into smaller sub-problems.',
+            source: 'question_bank'
+          });
         }
-      ];
-      for (let i = 0; i < count; i++) {
-        const item = techList[i % techList.length];
-        questions.push({
-          question: item.question,
-          type: item.type || "code",
-          expectedTime: 600,
-          difficulty: "hard",
-          language: item.type === "technical" ? null : "javascript",
-          testCases: item.testCases || [],
-          hint1: "Think about edge cases like empty inputs.",
-          hint2: "Performance matters for large inputs."
-        });
+      } else {
+        // Original hardcoded fallback if bank is empty
+        const techList = [
+          {
+            question: "Implement a function to find the longest substring without repeating characters in a given string.",
+            testCases: [
+              { input: "'abcabcbb'", output: "3" },
+              { input: "'bbbbb'", output: "1" }
+            ]
+          },
+          {
+            question: "Write a function to implement a custom Promise.all that handles errors gracefully.",
+            testCases: [{ input: "[]", output: "[]" }]
+          },
+          {
+            question: "Write a function to parse a large log string and extract the count of 'ERROR' occurrences.",
+            testCases: [{ input: "'INFO: ok\\nERROR: fail\\nERROR: crash'", output: "2" }]
+          },
+          {
+            question: "Design a high-level system for a real-time chat application. Focus on scalability and low latency.",
+            type: "technical"
+          }
+        ];
+        for (let i = 0; i < count; i++) {
+          const item = techList[i % techList.length];
+          questions.push({
+            question: item.question,
+            type: item.type || "code",
+            expectedTime: 600,
+            difficulty: "hard",
+            language: item.type === "technical" ? null : "javascript",
+            testCases: item.testCases || [],
+            hint1: "Think about edge cases like empty inputs.",
+            hint2: "Performance matters for large inputs."
+          });
+        }
       }
     } else {
-      const nonTechList = [
-        "CASE STUDY: You are managing a product launch that is 2 weeks behind schedule. Draft a mitigation plan and an email to stakeholders.",
-        "WRITING TASK: Draft a professional email to a client explaining why a requested feature cannot be implemented in the current sprint.",
-        "SITUATIONAL: A key team member suddenly resigns during a critical project. How do you reassign tasks to meet the deadline?",
-        "CASE STUDY: Analyze a declining user retention rate for a mobile app and propose three data-driven strategies to improve it.",
-        "WRITING TASK: Draft a proposal for a new internal tool that would improve team productivity by 20%.",
-        "SITUATIONAL: You have two conflicting priorities from different departments. How do you negotiate a resolution?",
-        "CASE STUDY: A customer is publicly complaining on social media about a service failure. Draft a response and a recovery plan.",
-        "WRITING TASK: Write a brief memo to your team summarizing the key takeaways from a recent quarterly review.",
-        "SITUATIONAL: How do you handle a situation where you realize a project you've been working on for months is no longer viable?",
-        "CASE STUDY: Propose a budget for a new marketing campaign targeting a specific demographic.",
-        "WRITING TASK: Draft a job description for a new role in your department, emphasizing essential vs. preferred skills."
-      ];
-      for (let i = 0; i < count; i++) {
-        questions.push({
-          question: nonTechList[i % nonTechList.length],
-          type: "behavioral",
-          expectedTime: 240,
-          difficulty: "medium"
-        });
+      // Non-technical: use general_knowledge + behavioral from bank
+      const combined = [...bankGKQuestions, ...bankBehavQuestions];
+      if (combined.length > 0) {
+        for (let i = 0; i < count; i++) {
+          const bankQ = combined[i % combined.length];
+          questions.push({
+            question: bankQ.question,
+            type: bankQ.type || 'behavioral',
+            expectedTime: 300,
+            difficulty: bankQ.difficulty || 'medium',
+            source: 'question_bank'
+          });
+        }
+      } else {
+        // Original hardcoded fallback if bank is empty
+        const nonTechList = [
+          "CASE STUDY: You are managing a product launch that is 2 weeks behind schedule. Draft a mitigation plan and an email to stakeholders.",
+          "WRITING TASK: Draft a professional email to a client explaining why a requested feature cannot be implemented in the current sprint.",
+          "SITUATIONAL: A key team member suddenly resigns during a critical project. How do you reassign tasks to meet the deadline?",
+          "CASE STUDY: Analyze a declining user retention rate for a mobile app and propose three data-driven strategies to improve it.",
+          "WRITING TASK: Draft a proposal for a new internal tool that would improve team productivity by 20%.",
+          "SITUATIONAL: You have two conflicting priorities from different departments. How do you negotiate a resolution?",
+          "CASE STUDY: A customer is publicly complaining on social media about a service failure. Draft a response and a recovery plan.",
+          "WRITING TASK: Write a brief memo to your team summarizing the key takeaways from a recent quarterly review.",
+          "SITUATIONAL: How do you handle a situation where you realize a project you've been working on for months is no longer viable?",
+          "CASE STUDY: Propose a budget for a new marketing campaign targeting a specific demographic.",
+          "WRITING TASK: Draft a job description for a new role in your department, emphasizing essential vs. preferred skills."
+        ];
+        for (let i = 0; i < count; i++) {
+          questions.push({
+            question: nonTechList[i % nonTechList.length],
+            type: "behavioral",
+            expectedTime: 240,
+            difficulty: "medium"
+          });
+        }
       }
     }
     return questions;
