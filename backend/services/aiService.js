@@ -409,7 +409,7 @@ Return ONLY valid JSON, no explanations.`;
   }
 
   // Generate questions based on CV and JD
-  async generateCVJDQuestions(position, cvSkills, jdRequirements, count) {
+  async generateCVJDQuestions(position, cvSkills, jdRequirements, count, experienceLevel = "Fresher") {
     const profile = this.getJobProfile(position);
     const isTechnical = profile && profile.category === 'technical';
 
@@ -420,16 +420,24 @@ Return ONLY valid JSON, no explanations.`;
     // Get few-shot examples from the question bank to guide AI generation
     const examples = this.getFewShotExamples(position, 5);
     const examplesBlock = examples.length > 0
-      ? `\n\nHere are some example questions for reference (generate NEW questions inspired by these patterns, do NOT copy them):\n${examples.map((e, i) => `${i + 1}. [${e.difficulty}] ${e.question}`).join('\n')}\n`
+      ? `\n\nSAMPLE QUESTION PATTERNS (DO NOT COPY THESE, use them to understand what makes a good question):\n${examples.map((e, i) => `${i + 1}. [${e.difficulty}] ${e.question}`).join('\n')}\n`
       : '';
 
+    const experienceBlock = `
+CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
+- If "Fresher", keep questions fundamental and scenario-based.
+- If "1-3 Years", ask about past projects, optimizations, and standard architecture.
+- If "5+ Years", ask about system design, scalability trade-offs, leadership, and highly complex systems.
+THE DIFFICULTY MUST SCALE WITH THE EXPERIENCE LEVEL. Generate DYNAMIC questions.`;
+
     const prompt = isTechnical ?
-      `Based on your expertise as a Senior HR Director at Microsoft, generate ${count} interview questions for a ${position} position.
+      `Based on your expertise as a Senior HR Director at Microsoft, generate ${count} NEW and DYNAMIC interview questions for a ${position} position.
 
 Generate ${count} interview questions based on:
 - Candidate's CV Skills: ${cvSkillsList}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
+${experienceBlock}
 ${examplesBlock}
 Question Distribution:
 - 50% "code" questions: Detailed coding challenges.
@@ -456,12 +464,13 @@ Each question MUST include:
       2. Coding questions must be solvable in the editor and executed via Judge0.
       3. Non-coding technical questions should still be practical.
       4. RETURN ONLY VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`
-      : `As a Senior HR Director at Microsoft, generate ${count} PRACTICAL interview questions for a ${position} position.
+      : `As a Senior HR Director at Microsoft, generate ${count} PRACTICAL and DYNAMIC interview questions for a ${position} position.
 
 Generate ${count} PRACTICAL interview questions based on:
 - Candidate's CV Experience: ${cvSkills.experience?.map(e => e.role).join(', ') || 'general experience'}
 - Job Requirements: ${jdReqsList}
 - Job Responsibilities: ${responsibilities}
+${experienceBlock}
 ${examplesBlock}
 Question types to include:
 - "case-study": A specific workplace scenario requiring a detailed strategy.
@@ -520,12 +529,13 @@ Return ONLY a valid JSON array.`;
       console.log('[AI Service] JD Requirements extracted:', jdRequirements.requirements?.length || 0, 'requirements');
 
       // Generate role-specific questions based on CV and JD
-      console.log(`[AI Service] Generating ${roleQuestionCount} CV/JD-based questions...`);
+      console.log(`[AI Service] Generating ${roleQuestionCount} CV/JD-based questions for experience level ${experienceLevel}...`);
       const roleQuestions = await this.generateCVJDQuestions(
         position,
         cvSkills,
         jdRequirements,
-        roleQuestionCount
+        roleQuestionCount,
+        experienceLevel
       );
 
       // Get fixed HR questions
@@ -809,12 +819,24 @@ Return ONLY a valid JSON array.`;
   }
 
   async generateRoundQuestions(round, count, cvText, position, experienceLevel, focusArea) {
+    // Get few-shot examples from the question bank to guide AI generation
+    const examples = this.getFewShotExamples(position, 3);
+    const examplesBlock = examples.length > 0
+      ? `\n\nSAMPLE QUESTION PATTERNS (DO NOT COPY THESE, use them to understand what makes a good question):\n${examples.map((e, i) => `${i + 1}. [${e.difficulty}] ${e.question}`).join('\n')}\n`
+      : '';
+
     const prompt = `
       As a Senior HR Director at Microsoft with 15+ years of experience, conduct an interview for a ${position} role (${experienceLevel} level).
       "${cvText.substring(0, 2000)}"
 
-      Generate ${count} questions for Round ${round}: ${focusArea}.
+      Generate ${count} NEW, DYNAMIC questions for Round ${round}: ${focusArea}.
       
+      CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
+      - If "Fresher", keep questions fundamental and scenario-based.
+      - If "1-3 Years", ask about past projects, optimizations, and standard architecture.
+      - If "5+ Years", ask about system design, scalability trade-offs, leadership, and highly complex systems.
+      THE DIFFICULTY MUST SCALE WITH THE EXPERIENCE LEVEL.
+      ${examplesBlock}
       Guidelines:
       - Round 1: Specific "How did you..." questions about projects/claims. Type: "cv-analysis".
       - Round 2: Strict "code" challenges (write a function) for tech roles. For non-tech, focus on "case-study" or "professional-writing".
