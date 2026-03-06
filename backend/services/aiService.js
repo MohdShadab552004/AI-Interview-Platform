@@ -499,6 +499,62 @@ Return ONLY a valid JSON array.`;
     }
   }
 
+  async generateRound(roundNum, count, position, cvSkills, jdRequirements, experienceLevel, isTechnical) {
+    const cvSkillsList = cvSkills.skills?.join(', ') || 'general skills';
+    const jdReqsList = jdRequirements.requirements?.join(', ') || 'role requirements';
+    const responsibilities = jdRequirements.responsibilities?.join(', ') || 'job responsibilities';
+
+    const examples = this.getFewShotExamples(position, 3);
+    const examplesBlock = examples.length > 0
+      ? `\n\nSAMPLE QUESTION PATTERNS:\n${examples.map((e, i) => `${i + 1}. [${e.difficulty}] ${e.question}`).join('\n')}\n`
+      : '';
+
+    const experienceBlock = `
+CRITICAL INSTRUCTION: Analyze the candidate's exact experience level ("${experienceLevel}").
+- If "Fresher", keep ALL questions very fundamental, easy, and practically normal.
+- If "1-3 Years", ask standard, normal practical problems and simple optimizations.
+- If "5+ Years", ask about practical system design and scalability.
+Do NOT ask highly theoretical, obscure, or overly complex questions. Keep it normal.`;
+
+    let roundFocus = "";
+    if (roundNum === 1) {
+      roundFocus = `ROUND 1 FOCUS: Introduction, CV Analysis, and Role Concepts.
+You MUST read the candidate's CV Skills and Projects provided above. Generate questions STRICTLY about the specific skills/projects mentioned there. 
+Question Type: MUST be "experience" or "technical". NO coding challenges in this round.`;
+    } else if (roundNum === 2) {
+      roundFocus = `ROUND 2 FOCUS: Complete Practical Approach.
+${isTechnical ?
+          'Question Type: MUST be "code". Generate very basic, standard practical Data Structures & Algorithms (DSA) challenges (like Leetcode Easy - Arrays, Strings, loops, basic logic) solvable in a browser code editor.'
+          : 'Question Type: MUST be "case-study" or "situational". Provide practical professional scenarios to solve.'}`;
+    }
+
+    const prompt = `As a Senior HR Director and Technical Lead, generate ${count} questions for ROUND ${roundNum} for a ${position} position.
+
+Candidate CV Skills: ${cvSkillsList}
+Job Requirements: ${jdReqsList}
+Job Responsibilities: ${responsibilities}
+
+${experienceBlock}
+${examplesBlock}
+${roundFocus}
+
+Each question MUST include:
+{
+  "question": "Clear, specific practical question",
+  "type": "code|technical|experience|case-study|behavioral|situational",
+  "expectedTime": 300,
+  "difficulty": "easy|medium|hard",
+  "language": "Suggested language (javascript/python/java/cpp - ONLY for code type)",
+  "hint1": "Small conceptual hint",
+  "hint2": "Detailed implementation hint",
+  "testCases": [
+    {"input": "example input", "output": "expected output"}
+  ]
+}
+
+CRITICAL: RETURN ONLY A VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`;
+    return await this.safeGenerateQuestions(prompt, count, "mixed");
+  }
 
   // Generate interview questions based on CV and Job Description
   async generateQuestions(position, experienceLevel, cvText = '', jobDescription = '') {
@@ -531,21 +587,26 @@ Return ONLY a valid JSON array.`;
       console.log('[AI Service] CV Skills extracted:', cvSkills.skills?.length || 0, 'skills');
       console.log('[AI Service] JD Requirements extracted:', jdRequirements.requirements?.length || 0, 'requirements');
 
-      // Generate role-specific questions based on CV and JD
-      console.log(`[AI Service] Generating ${roleQuestionCount} CV/JD-based questions for experience level ${experienceLevel}...`);
-      const roleQuestions = await this.generateCVJDQuestions(
-        position,
-        cvSkills,
-        jdRequirements,
-        roleQuestionCount,
-        experienceLevel
-      );
+      // Generate role-specific questions divided into Round 1 and Round 2
+      const isTech = category === 'technical';
+      const round1Count = Math.floor(roleQuestionCount * 0.5);
+      const round2Count = roleQuestionCount - round1Count;
+
+      console.log(`[AI Service] Generating Round 1 (${round1Count}) and Round 2 (${round2Count}) for experience level ${experienceLevel}...`);
+
+      const p1 = this.generateRound(1, round1Count, position, cvSkills, jdRequirements, experienceLevel, isTech);
+      const p2 = this.generateRound(2, round2Count, position, cvSkills, jdRequirements, experienceLevel, isTech);
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+
+      const round1Questions = r1.map((q) => ({ ...q, round: "Round 1: Intro & CV Analysis" }));
+      const round2Questions = r2.map((q) => ({ ...q, round: "Round 2: Practical Approach" }));
 
       // Get fixed HR questions
-      const hrQuestions = this.getFixedHRQuestions(hrCount);
+      const hrQuestions = this.getFixedHRQuestions(hrCount).map((q) => ({ ...q, round: "Round 3: HR & Behavioral" }));
 
       // Combine all questions
-      const allQuestions = [...roleQuestions, ...hrQuestions];
+      const allQuestions = [...round1Questions, ...round2Questions, ...hrQuestions];
 
       console.log(`[AI Service] Generated ${allQuestions.length} total questions`);
       console.log(`  - ${roleQuestions.length} role-specific questions`);

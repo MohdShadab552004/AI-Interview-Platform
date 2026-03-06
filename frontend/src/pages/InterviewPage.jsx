@@ -587,19 +587,29 @@ const InterviewPage = () => {
                     </div>
                   </div>
 
-                  <div className="question-navigator">
-                    <h3>Questions ({currentQuestionIndex + 1}/{interview.questions.length})</h3>
-                    <div className="question-grid">
-                      {interview.questions.map((q, idx) => (
-                        <button
-                          key={idx}
-                          className={`question-block ${idx === currentQuestionIndex ? 'active' : ''} ${attemptedQuestions.has(idx) ? 'attempted' : ''}`}
-                          onClick={() => navigateToQuestion(idx)}
-                        >
-                          {idx + 1}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="question-navigator" style={{ overflowY: 'auto', maxHeight: '35vh' }}>
+                    <h3 style={{ marginBottom: '10px' }}>Questions ({currentQuestionIndex + 1}/{interview.questions.length})</h3>
+                    {Array.from(new Set(interview.questions.map(q => q.round || 'General'))).map(roundName => (
+                      <div key={roundName} style={{ marginBottom: '16px' }}>
+                        <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#94a3b8', marginBottom: '8px', borderBottom: '1px solid #334155', paddingBottom: '4px' }}>
+                          {roundName}
+                        </div>
+                        <div className="question-grid">
+                          {interview.questions.map((q, idx) => {
+                            if ((q.round || 'General') !== roundName) return null;
+                            return (
+                              <button
+                                key={idx}
+                                className={`question-block ${idx === currentQuestionIndex ? 'active' : ''} ${attemptedQuestions.has(idx) ? 'attempted' : ''}`}
+                                onClick={() => navigateToQuestion(idx)}
+                              >
+                                {idx + 1}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
@@ -608,6 +618,9 @@ const InterviewPage = () => {
                     <div className="question-header-new">
                       <span className="question-number">Question {currentQuestionIndex + 1}/{interview.questions.length}</span>
                       <div className="question-badges">
+                        {currentQuestion?.round && (
+                          <span className="question-type" style={{ background: '#8b5cf6' }}>{currentQuestion.round.split(':')[0]}</span>
+                        )}
                         <span className="question-type">{currentQuestion?.type || 'general'}</span>
                         <span className="question-difficulty">{currentQuestion?.difficulty || 'medium'}</span>
                         <div className={`speaking-indicator ${isSpeaking ? 'speaking' : 'listening'}`} style={{
