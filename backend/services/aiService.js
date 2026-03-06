@@ -571,8 +571,9 @@ CRITICAL: RETURN ONLY A VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`;
       const allQuestions = [...round1Questions, ...round2Questions, ...hrQuestions];
 
       console.log(`[AI Service] Generated ${allQuestions.length} total questions`);
-      console.log(`  - ${roleQuestions.length} role-specific questions`);
-      console.log(`  - ${hrQuestions.length} HR questions`);
+      console.log(`  - ${round1Questions.length} Round 1 questions`);
+      console.log(`  - ${round2Questions.length} Round 2 questions`);
+      console.log(`  - ${hrQuestions.length} Round 3 (HR) questions`);
 
       return allQuestions;
 
@@ -581,10 +582,15 @@ CRITICAL: RETURN ONLY A VALID JSON ARRAY. NO MARKDOWN, NO EXPLANATIONS.`;
 
       // Fallback to generic questions
       console.log('[AI Service] Using fallback questions');
-      const fallbackQuestions = this.getFallbackQuestionsByRole(position, roleQuestionCount);
-      const hrQuestions = this.getFixedHRQuestions(hrCount);
+      const roleFallback = this.getFallbackQuestionsByRole(position, roleQuestionCount);
 
-      return [...fallbackQuestions, ...hrQuestions];
+      const round1Count = Math.floor(roleQuestionCount * 0.5);
+      const round1Questions = roleFallback.slice(0, round1Count).map(q => ({ ...q, round: "Round 1: Intro & CV Analysis" }));
+      const round2Questions = roleFallback.slice(round1Count).map(q => ({ ...q, round: "Round 2: Practical Approach" }));
+
+      const hrQuestions = this.getFixedHRQuestions(hrCount).map(q => ({ ...q, round: "Round 3: HR & Behavioral" }));
+
+      return [...round1Questions, ...round2Questions, ...hrQuestions];
     }
   }
 
